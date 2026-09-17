@@ -1,0 +1,15 @@
+{
+  "$comment": "Example only — not loaded by the game yet. Runtime overrides belong in user://, not art/approved/.",
+  "version": 1,
+  "ground": "user://custom_ground.png",
+  "water_mask": "user://water_mask.png",
+  "hide_baked_props": true,
+  "water_flow_dir": [0.18, 0.92],
+  "path_loop": true,
+  "path_ignore_collision": true,
+  "path_uv": [
+    [0.42, 0.42],
+    [0.50, 0.48],
+    [0.62, 0.70]
+  ]
+}

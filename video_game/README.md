@@ -67,6 +67,10 @@ python3 tools/prepare_art.py
 
 The current atlas includes two-story / turret cottages. Later house assets should be slightly **lower-tier** with fewer two-story buildings. Keep using this sheet until that pack exists.
 
+## Custom ground / water / path (planned)
+
+Feasibility for swapping the terrain PNG, painting the water mask in-engine, and editing a walk polyline: [`docs/custom-editor-feasibility.md`](docs/custom-editor-feasibility.md). Example data contract: [`resources/scene_layout.example.json`](resources/scene_layout.example.json). Not wired into gameplay yet (WASD sandbox is unchanged).
+
 ## Next art-tech experiments
 
 - 8-direction (or 4-direction) **walk-cycle spritesheet** for a farmer that matches the painted atlas, replacing `art/generated/player_placeholder.png`.
