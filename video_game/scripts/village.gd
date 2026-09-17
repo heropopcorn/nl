@@ -405,6 +405,7 @@ func rebuild_map_bounds() -> void:
 func _setup_editor() -> void:
 	director_active = true
 	hint.visible = false
+	hud.layer = 32
 	var script := load("res://scripts/director/director_desk.gd") as Script
 	editor = script.new()
 	editor.name = "DirectorDesk"

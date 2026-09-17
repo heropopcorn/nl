@@ -70,7 +70,13 @@ var _status_label: Label
 var _transport_label: Label
 var _search_edit: LineEdit
 var _scene_box: VBoxContainer
-var _tabs: TabContainer
+var _tabs: Control
+var _tab_index := 0
+var _tab_btns: Array[Button] = []
+var _tab_pages: Array[ScrollContainer] = []
+var _last_layout_size := Vector2.ZERO
+var _box_a_screen := Vector2.ZERO
+var _box_b_screen := Vector2.ZERO
 var _empty_label: Label
 var _play_btn: Button
 var _loop_box: CheckBox
@@ -355,7 +361,7 @@ func _build_hud() -> void:
 	_fill_left()
 	_fill_right()
 	_fill_bottom()
-	_empty_label = _label("暂无场景，点击「新建场景」开始编排。", 16, true)
+	_empty_label = _label("暂无场景，点击「新建场景」开始编排。", 16, true, true)
 	_empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_empty_label.anchor_left = 0.5
 	_empty_label.anchor_right = 0.5
@@ -374,11 +380,16 @@ func _fill_top() -> void:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	_top.add_child(row)
-	row.add_child(_label("导演台", 18, true))
+	var title := _label("导演台", 18, true)
+	title.clip_text = false
+	title.custom_minimum_size = Vector2(80, 0)
+	row.add_child(title)
 	_scene_name_label = _label("未选择场景", 15, false)
 	_scene_name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(_scene_name_label)
 	_save_label = _label("已保存", 13, false)
+	_save_label.clip_text = false
+	_save_label.custom_minimum_size = Vector2(96, 0)
 	row.add_child(_save_label)
 	row.add_child(_btn("撤销", _undo))
 	row.add_child(_btn("重做", _redo))
@@ -410,44 +421,70 @@ func _fill_left() -> void:
 	_scene_box = VBoxContainer.new()
 	_scene_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_scene_box)
-	_status_label = _label(" ", 13, false)
+	_status_label = _label(" ", 13, false, true)
 	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status_label.custom_minimum_size = Vector2(200, 64)
 	box.add_child(_status_label)
 
 
 func _fill_right() -> void:
-	_tabs = TabContainer.new()
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 6)
+	_right.add_child(col)
+	var tab_row := HBoxContainer.new()
+	var names := ["场景", "水域", "角色", "天气"]
+	_tab_btns.clear()
+	_tab_pages.clear()
+	for i in range(names.size()):
+		var idx := i
+		var button := _btn(names[i], func() -> void: _select_tab(idx))
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tab_row.add_child(button)
+		_tab_btns.append(button)
+	col.add_child(tab_row)
+	_tabs = Control.new()
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_right.add_child(_tabs)
-	_tabs.add_child(_make_scroll("场景"))
-	_tabs.add_child(_make_scroll("水域"))
-	_tabs.add_child(_make_scroll("角色"))
-	_tabs.add_child(_make_scroll("天气"))
-	_tabs.tab_changed.connect(func(_i: int) -> void: _refresh_inspector())
+	_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_tabs.custom_minimum_size = Vector2(0, 160)
+	_tabs.clip_contents = true
+	col.add_child(_tabs)
+	for i in range(names.size()):
+		var scroll := _make_scroll(names[i])
+		scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		scroll.visible = i == 0
+		_tabs.add_child(scroll)
+		_tab_pages.append(scroll)
+	_select_tab(0)
+
+
+func _select_tab(index: int) -> void:
+	_tab_index = index
+	for i in range(_tab_pages.size()):
+		_tab_pages[i].visible = i == index
+		if i < _tab_btns.size():
+			_tab_btns[i].modulate = Color(1.15, 0.95, 0.55) if i == index else Color.WHITE
+	_refresh_inspector()
 
 
 func _fill_bottom() -> void:
-	var col := VBoxContainer.new()
-	_bottom.add_child(col)
-	var modes := HBoxContainer.new()
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	_bottom.add_child(row)
 	_mode_btns[Mode.SELECT] = _btn("选择", func() -> void: _set_mode(Mode.SELECT))
 	_mode_btns[Mode.BOX_WATER] = _btn("框选水域", func() -> void: _set_mode(Mode.BOX_WATER))
 	_mode_btns[Mode.EDIT_ROUTE] = _btn("编辑路线", func() -> void: _set_mode(Mode.EDIT_ROUTE))
 	for child in _mode_btns.values():
-		child.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		modes.add_child(child)
-	col.add_child(modes)
-	var transport := HBoxContainer.new()
-	transport.add_child(_btn("回到开头", func() -> void: _stop_preview(false)))
+		row.add_child(child)
+	row.add_child(_btn("回到开头", func() -> void: _stop_preview(false)))
 	_play_btn = _btn("播放", func() -> void: _toggle_play())
-	transport.add_child(_play_btn)
-	transport.add_child(_btn("停止", func() -> void: _stop_preview(true)))
+	row.add_child(_play_btn)
+	row.add_child(_btn("停止", func() -> void: _stop_preview(true)))
 	_loop_box = _checkbox("循环预览", false, func(v: bool) -> void: preview.loop_preview = v)
-	transport.add_child(_loop_box)
+	row.add_child(_loop_box)
 	_transport_label = _label("已停止", 13, false)
-	transport.add_child(_transport_label)
-	col.add_child(transport)
+	_transport_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(_transport_label)
 
 
 func _make_scroll(title: String) -> ScrollContainer:
@@ -466,10 +503,13 @@ func _build_dialogs() -> void:
 	_help = AcceptDialog.new()
 	_help.title = "帮助"
 	_help.dialog_text = HELP_TEXT
+	_help.ok_button_text = "关闭"
 	_help.min_size = Vector2(520, 360)
 	add_child(_help)
 	_new_dialog = ConfirmationDialog.new()
 	_new_dialog.title = "新建场景"
+	_new_dialog.ok_button_text = "创建"
+	_new_dialog.cancel_button_text = "取消"
 	_new_dialog.confirmed.connect(_confirm_new_scene)
 	var nb := VBoxContainer.new()
 	_new_name = LineEdit.new()
@@ -488,12 +528,16 @@ func _build_dialogs() -> void:
 	add_child(_new_dialog)
 	_rename_dialog = ConfirmationDialog.new()
 	_rename_dialog.title = "重命名"
+	_rename_dialog.ok_button_text = "确定"
+	_rename_dialog.cancel_button_text = "取消"
 	_rename_edit = LineEdit.new()
 	_rename_dialog.add_child(_rename_edit)
 	_rename_dialog.confirmed.connect(_confirm_rename)
 	add_child(_rename_dialog)
 	_delete_dialog = ConfirmationDialog.new()
 	_delete_dialog.title = "删除场景"
+	_delete_dialog.ok_button_text = "删除"
+	_delete_dialog.cancel_button_text = "取消"
 	_delete_dialog.confirmed.connect(_confirm_delete)
 	add_child(_delete_dialog)
 	_conflict_dialog = ConfirmationDialog.new()
@@ -505,6 +549,9 @@ func _build_dialogs() -> void:
 
 
 func _process(delta: float) -> void:
+	var vp := get_viewport_rect().size
+	if vp != _last_layout_size:
+		_apply_layout()
 	if village and village.player:
 		village.player.control_enabled = not _shortcuts_blocked()
 	preview.tick(delta, preview.is_paused())
@@ -516,6 +563,22 @@ func _process(delta: float) -> void:
 		_transport_label.text = preview.status_text()
 	if _play_btn:
 		_play_btn.text = "暂停" if preview.is_playing() else "播放"
+
+
+func _input(event: InputEvent) -> void:
+	if _drag == DragKind.NONE:
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		_on_left_mouse(event)
+		get_viewport().set_input_as_handled()
+	elif event is InputEventMouseMotion:
+		_on_mouse_move(event)
+		get_viewport().set_input_as_handled()
+	elif event is InputEventKey and event.pressed and not event.echo:
+		var key_event := event as InputEventKey
+		if key_event.physical_keycode == KEY_ESCAPE:
+			_on_escape()
+			get_viewport().set_input_as_handled()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -566,6 +629,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _on_left_mouse(event: InputEventMouseButton) -> void:
 	if model == null or _preview_locked_edits():
+		if not event.pressed:
+			_drag = DragKind.NONE
 		if event.pressed and _preview_locked_edits():
 			_set_status("预览中不能编辑水域或路线。")
 		return
@@ -575,6 +640,8 @@ func _on_left_mouse(event: InputEventMouseButton) -> void:
 			_drag = DragKind.BOX
 			_box_a = world
 			_box_b = world
+			_box_a_screen = _screen_mouse()
+			_box_b_screen = _box_a_screen
 			get_viewport().set_input_as_handled()
 			return
 		if mode == Mode.EDIT_ROUTE:
@@ -599,6 +666,7 @@ func _on_mouse_move(_event: InputEventMouseMotion) -> void:
 	var world := village.get_global_mouse_position()
 	if _drag == DragKind.BOX:
 		_box_b = world
+		_box_b_screen = _screen_mouse()
 	elif _drag == DragKind.WATER_MOVE:
 		_drag_move_water(world)
 	elif _drag == DragKind.WATER_RESIZE:
@@ -618,14 +686,14 @@ func _click_select(world: Vector2) -> void:
 			selected_water_id = ""
 			_begin_cmd()
 			_drag = DragKind.ROUTE_POINT
-			_tabs.current_tab = 2
+			_select_tab(2)
 			_refresh_inspector()
 			return
 	var rid := water.hit_region(world, model)
 	if not rid.is_empty():
 		selected_water_id = rid
 		selected_point = -2
-		_tabs.current_tab = 1
+		_select_tab(1)
 		var region := _water_by_id(rid)
 		var rect := water.world_rect_of(region)
 		_begin_cmd()
@@ -668,12 +736,14 @@ func _click_route(world: Vector2) -> void:
 
 
 func _finish_box() -> void:
+	_box_b = village.get_global_mouse_position()
+	_box_b_screen = _screen_mouse()
 	_drag = DragKind.NONE
-	var rect := _normalized_world_rect(_box_a, _box_b)
-	var zoom := village.camera.zoom.x if village.camera else 1.0
-	if rect.size.x * zoom < 8.0 or rect.size.y * zoom < 8.0:
+	var screen_rect := _normalized_world_rect(_box_a_screen, _box_b_screen)
+	if screen_rect.size.x < 8.0 or screen_rect.size.y < 8.0:
 		_set_status("框太小，未创建水域。")
 		return
+	var rect := _normalized_world_rect(_box_a, _box_b)
 	var uv := _world_to_uv_rect(rect)
 	var px := village.terrain_size()
 	if uv.size.x * px.x < 8.0 or uv.size.y * px.y < 8.0:
@@ -685,7 +755,7 @@ func _finish_box() -> void:
 	selected_water_id = id
 	_end_cmd()
 	_sync_world()
-	_tabs.current_tab = 1
+	_select_tab(1)
 	_refresh_inspector()
 	if model.has_water_overlap():
 		_set_status("水域不能重叠")
@@ -851,7 +921,7 @@ func _scene_card(entry: Dictionary) -> PanelContainer:
 
 
 func _refresh_inspector() -> void:
-	if _tabs == null:
+	if _tab_pages.size() < 4:
 		return
 	_loading = true
 	_fill_scene_tab()
@@ -862,8 +932,9 @@ func _refresh_inspector() -> void:
 
 
 func _tab_inner(index: int) -> VBoxContainer:
-	var scroll: ScrollContainer = _tabs.get_child(index)
-	return scroll.get_node("Inner") as VBoxContainer
+	if index < 0 or index >= _tab_pages.size():
+		return null
+	return _tab_pages[index].get_node("Inner") as VBoxContainer
 
 
 func _clear_inner(inner: VBoxContainer) -> void:
@@ -875,12 +946,14 @@ func _clear_inner(inner: VBoxContainer) -> void:
 
 func _fill_scene_tab() -> void:
 	var inner := _tab_inner(0)
+	if inner == null:
+		return
 	_clear_inner(inner)
 	inner.add_child(_label("场景", 14, true))
 	if model == null:
 		inner.add_child(_label("没有打开的场景。", 13, false))
 		return
-	inner.add_child(_btn("上传背景", _open_replace_background))
+	inner.add_child(_btn("更换背景", _open_replace_background))
 	inner.add_child(_btn("空白画布", _replace_with_blank))
 	inner.add_child(_checkbox("显示内置道具", bool(model.editor.get("show_baked_props", true)), func(v: bool) -> void:
 		if _loading: return
@@ -922,6 +995,8 @@ func _fill_scene_tab() -> void:
 
 func _fill_water_tab() -> void:
 	var inner := _tab_inner(1)
+	if inner == null:
+		return
 	_clear_inner(inner)
 	inner.add_child(_label("水域", 14, true))
 	inner.add_child(_btn("框选水域", func() -> void: _set_mode(Mode.BOX_WATER)))
@@ -978,6 +1053,8 @@ func _fill_water_tab() -> void:
 
 func _fill_actor_tab() -> void:
 	var inner := _tab_inner(2)
+	if inner == null:
+		return
 	_clear_inner(inner)
 	inner.add_child(_label("角色", 14, true))
 	inner.add_child(_btn("添加角色", _add_actor_clicked))
@@ -1039,6 +1116,8 @@ func _fill_actor_tab() -> void:
 
 func _fill_weather_tab() -> void:
 	var inner := _tab_inner(3)
+	if inner == null:
+		return
 	_clear_inner(inner)
 	inner.add_child(_label("天气", 14, true))
 	if model == null:
@@ -1077,13 +1156,13 @@ func _add_actor_clicked() -> void:
 	_set_actor(CharacterRegistry.FARMER, village.world_to_uv(village.player.position), [])
 	_end_cmd()
 	_sync_world()
-	_tabs.current_tab = 2
+	_select_tab(2)
 	_refresh_inspector()
 	_set_status("已添加角色，可编辑路线。")
 
 
 func _set_mode(next: Mode) -> void:
-	if next != Mode.PREVIEW and preview.entered_preview and preview.is_playing():
+	if next != Mode.PREVIEW and (preview.is_playing() or preview.is_paused()):
 		return
 	mode = next
 	_refresh_mode_buttons()
@@ -1187,8 +1266,11 @@ func _on_path_ended(reason: String) -> void:
 
 
 func _on_escape() -> void:
-	if preview.is_playing() or preview.is_paused() or mode == Mode.PREVIEW:
+	if preview.is_playing() or preview.is_paused():
 		_stop_preview(true)
+		return
+	if mode == Mode.PREVIEW:
+		_set_mode(Mode.SELECT)
 		return
 	if _drag == DragKind.BOX:
 		_drag = DragKind.NONE
@@ -1198,7 +1280,7 @@ func _on_escape() -> void:
 
 
 func _preview_locked_edits() -> bool:
-	return mode == Mode.PREVIEW or preview.is_playing() or preview.is_paused()
+	return preview.is_playing() or preview.is_paused()
 
 
 func _begin_cmd() -> void:
@@ -1642,10 +1724,15 @@ func _near(a: Vector2, b: Vector2) -> bool:
 	return a.distance_to(b) <= HANDLE * 1.6 / zoom
 
 
+func _screen_mouse() -> Vector2:
+	return get_viewport().get_mouse_position()
+
+
 func _apply_layout() -> void:
 	if _top == null:
 		return
 	var size := get_viewport_rect().size
+	_last_layout_size = size
 	_narrow = size.x < NARROW
 	_top.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	_top.offset_bottom = TOP_H
@@ -1748,7 +1835,7 @@ func _chrome_panel() -> PanelContainer:
 	return panel
 
 
-func _label(text: String, size: int, bold: bool) -> Label:
+func _label(text: String, size: int, bold: bool, wrap: bool = false) -> Label:
 	var label := Label.new()
 	label.text = text
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1756,7 +1843,11 @@ func _label(text: String, size: int, bold: bool) -> Label:
 	label.add_theme_color_override("font_color", Color(1.0, 0.96, 0.84) if bold else Color(0.92, 0.88, 0.78))
 	label.add_theme_color_override("font_outline_color", Color(0.14, 0.1, 0.06))
 	label.add_theme_constant_override("outline_size", 4)
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if wrap:
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	else:
+		label.autowrap_mode = TextServer.AUTOWRAP_OFF
+		label.clip_text = true
 	return label
 
 
