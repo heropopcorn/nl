@@ -83,6 +83,7 @@ var _loop_box: CheckBox
 var _drawer_scene_btn: Button
 var _drawer_prop_btn: Button
 var _mode_btns: Dictionary = {}
+var _canvas_catch: ColorRect
 var _help: AcceptDialog
 var _new_dialog: ConfirmationDialog
 var _new_name: LineEdit
@@ -349,6 +350,11 @@ func _build_picker() -> void:
 
 
 func _build_hud() -> void:
+	_canvas_catch = ColorRect.new()
+	_canvas_catch.color = Color(0, 0, 0, 0)
+	_canvas_catch.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_canvas_catch.gui_input.connect(_on_canvas_gui_input)
+	add_child(_canvas_catch)
 	_top = _chrome_panel()
 	_left = _chrome_panel()
 	_right = _chrome_panel()
@@ -492,9 +498,11 @@ func _make_scroll(title: String) -> ScrollContainer:
 	scroll.name = title
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var inner := VBoxContainer.new()
 	inner.name = "Inner"
 	inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	inner.custom_minimum_size = Vector2(260, 0)
 	scroll.add_child(inner)
 	return scroll
 
@@ -552,6 +560,9 @@ func _process(delta: float) -> void:
 	var vp := get_viewport_rect().size
 	if vp != _last_layout_size:
 		_apply_layout()
+	if _drag == DragKind.BOX and village:
+		_box_b = village.get_global_mouse_position()
+		_box_b_screen = _screen_mouse()
 	if village and village.player:
 		village.player.control_enabled = not _shortcuts_blocked()
 	preview.tick(delta, preview.is_paused())
@@ -627,21 +638,40 @@ func _unhandled_input(event: InputEvent) -> void:
 		_on_mouse_move(event)
 
 
+func _on_canvas_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		_on_left_mouse(event)
+		accept_event()
+	elif event is InputEventMouseMotion:
+		_on_mouse_move(event)
+		if _drag != DragKind.NONE:
+			accept_event()
+
+
 func _on_left_mouse(event: InputEventMouseButton) -> void:
 	if model == null or _preview_locked_edits():
 		if not event.pressed:
 			_drag = DragKind.NONE
+			_update_catcher()
 		if event.pressed and _preview_locked_edits():
 			_set_status("预览中不能编辑水域或路线。")
 		return
-	var world := village.get_global_mouse_position()
+	var world := _event_world(event)
+	var screen := _event_screen(event)
 	if event.pressed:
 		if mode == Mode.BOX_WATER:
-			_drag = DragKind.BOX
-			_box_a = world
-			_box_b = world
-			_box_a_screen = _screen_mouse()
-			_box_b_screen = _box_a_screen
+			if _drag == DragKind.BOX:
+				_box_b = world
+				_box_b_screen = screen
+				_try_commit_box()
+			else:
+				_drag = DragKind.BOX
+				_box_a = world
+				_box_b = world
+				_box_a_screen = screen
+				_box_b_screen = screen
+				_update_catcher()
+				_set_status("框选水域：拖出矩形，或在对角再点一次结束。")
 			get_viewport().set_input_as_handled()
 			return
 		if mode == Mode.EDIT_ROUTE:
@@ -652,11 +682,14 @@ func _on_left_mouse(event: InputEventMouseButton) -> void:
 		get_viewport().set_input_as_handled()
 	else:
 		if _drag == DragKind.BOX:
-			_finish_box()
+			_box_b = world
+			_box_b_screen = screen
+			_try_commit_box()
 		elif _drag != DragKind.NONE:
 			_end_cmd()
 			_sync_world()
-		_drag = DragKind.NONE
+			_drag = DragKind.NONE
+			_update_catcher()
 		get_viewport().set_input_as_handled()
 
 
@@ -735,20 +768,27 @@ func _click_route(world: Vector2) -> void:
 	_set_status("已添加路线点 %d。" % pts.size())
 
 
-func _finish_box() -> void:
-	_box_b = village.get_global_mouse_position()
-	_box_b_screen = _screen_mouse()
-	_drag = DragKind.NONE
+func _try_commit_box() -> void:
 	var screen_rect := _normalized_world_rect(_box_a_screen, _box_b_screen)
 	if screen_rect.size.x < 8.0 or screen_rect.size.y < 8.0:
-		_set_status("框太小，未创建水域。")
+		_set_status("继续拖动，或在对角再点一次结束框选。")
+		return
+	_finish_box()
+
+
+func _finish_box() -> void:
+	var screen_rect := _normalized_world_rect(_box_a_screen, _box_b_screen)
+	if screen_rect.size.x < 8.0 or screen_rect.size.y < 8.0:
+		_set_status("继续拖动，或在对角再点一次结束框选。")
 		return
 	var rect := _normalized_world_rect(_box_a, _box_b)
 	var uv := _world_to_uv_rect(rect)
 	var px := village.terrain_size()
 	if uv.size.x * px.x < 8.0 or uv.size.y * px.y < 8.0:
-		_set_status("水域矩形过小（至少 8×8 像素）")
+		_set_status("水域矩形过小（至少 8×8 像素），请拉大再结束。")
 		return
+	_drag = DragKind.NONE
+	_update_catcher()
 	_begin_cmd()
 	var id := DirectorSceneModel.new_hex_id("water_", 4)
 	_add_water(uv, Vector2(0, 1), id)
@@ -1057,7 +1097,7 @@ func _fill_actor_tab() -> void:
 		return
 	_clear_inner(inner)
 	inner.add_child(_label("角色", 14, true))
-	inner.add_child(_btn("添加角色", _add_actor_clicked))
+	inner.add_child(_btn("添加角色", _add_actor_clicked, 36.0))
 	var actor := actors.first_actor(model) if model else {}
 	if actor.is_empty():
 		inner.add_child(_label("尚未添加角色。P0 每场 1 人。", 13, false))
@@ -1166,11 +1206,12 @@ func _set_mode(next: Mode) -> void:
 		return
 	mode = next
 	_refresh_mode_buttons()
+	_update_catcher()
 	match mode:
 		Mode.SELECT:
 			_set_status("选择：左键选对象，右键拖动画布。")
 		Mode.BOX_WATER:
-			_set_status("框选水域：拖出矩形。Esc 取消。")
+			_set_status("框选水域：拖出矩形，或在对角再点一次结束。")
 		Mode.EDIT_ROUTE:
 			_set_status("编辑路线：左键加点，Backspace 删末点。")
 		Mode.PREVIEW:
@@ -1198,6 +1239,9 @@ func _try_play() -> bool:
 		_set_status("水域不能重叠")
 		return false
 	var actor := actors.first_actor(model)
+	if actor.is_empty():
+		_set_status("请先添加角色。")
+		return false
 	if not actors.can_play(actor):
 		_set_status("路线至少需要 2 个点才能播放")
 		return false
@@ -1274,6 +1318,8 @@ func _on_escape() -> void:
 		return
 	if _drag == DragKind.BOX:
 		_drag = DragKind.NONE
+		_update_catcher()
+		_set_status("已取消框选。")
 		return
 	if mode != Mode.SELECT:
 		_set_mode(Mode.SELECT)
@@ -1724,8 +1770,27 @@ func _near(a: Vector2, b: Vector2) -> bool:
 	return a.distance_to(b) <= HANDLE * 1.6 / zoom
 
 
+func _event_screen(event: InputEvent) -> Vector2:
+	if event is InputEventMouse:
+		return (event as InputEventMouse).global_position
+	return _screen_mouse()
+
+
+func _event_world(_event: InputEvent) -> Vector2:
+	if village == null:
+		return Vector2.ZERO
+	return village.get_global_mouse_position()
+
+
 func _screen_mouse() -> Vector2:
 	return get_viewport().get_mouse_position()
+
+
+func _update_catcher() -> void:
+	if _canvas_catch == null:
+		return
+	var grab := mode == Mode.BOX_WATER or mode == Mode.EDIT_ROUTE or _drag != DragKind.NONE
+	_canvas_catch.mouse_filter = Control.MOUSE_FILTER_STOP if grab else Control.MOUSE_FILTER_IGNORE
 
 
 func _apply_layout() -> void:
@@ -1762,6 +1827,17 @@ func _apply_layout() -> void:
 		_right.offset_top = TOP_H
 		_right.offset_bottom = -BOTTOM_H
 		_right.offset_left = -RIGHT_W
+	if _canvas_catch:
+		_canvas_catch.set_anchors_preset(Control.PRESET_FULL_RECT)
+		_canvas_catch.offset_top = TOP_H
+		_canvas_catch.offset_bottom = -BOTTOM_H
+		if _narrow:
+			_canvas_catch.offset_left = LEFT_W if _left_open else 0.0
+			_canvas_catch.offset_right = -RIGHT_W if _right_open else 0.0
+		else:
+			_canvas_catch.offset_left = LEFT_W
+			_canvas_catch.offset_right = -RIGHT_W
+	_update_catcher()
 
 
 func _toggle_drawer(left_side: bool) -> void:
@@ -1851,11 +1927,11 @@ func _label(text: String, size: int, bold: bool, wrap: bool = false) -> Label:
 	return label
 
 
-func _btn(text: String, handler: Callable) -> Button:
+func _btn(text: String, handler: Callable, min_h: float = 28.0) -> Button:
 	var button := Button.new()
 	button.text = text
 	button.focus_mode = Control.FOCUS_NONE
-	button.custom_minimum_size = Vector2(0, 28)
+	button.custom_minimum_size = Vector2(0, min_h)
 	button.pressed.connect(handler)
 	return button
 
