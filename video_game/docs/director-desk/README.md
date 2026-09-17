@@ -1,12 +1,13 @@
 # 导演台设计交付
 
-本目录是 `video_game/` 下一阶段「导演台」的实现依据。本轮只有设计和契约，没有完整 Godot 实现。
+本目录是 `video_game/`「导演台」的实现依据与用法。
 
 阅读顺序：
 
-1. [`director-desk-design.md`](director-desk-design.md)：产品边界、中文 HUD、P0/P1、数据模型、风险、验收与 Cursor checklist。
-2. [`scene-schema.example.json`](scene-schema.example.json)：可直接用于解析/round-trip 测试的 v2 场景实例。
-3. [`cursor-handoff.md`](cursor-handoff.md)：给 Cursor 的最短开工指令。
+1. [`usage.md`](usage.md)：P0 用户操作（中文 HUD、多场景、矩形水域、角色路线、下雨）。
+2. [`director-desk-design.md`](director-desk-design.md)：产品边界、数据模型、P0/P1、验收。
+3. [`scene-schema.example.json`](scene-schema.example.json)：v2 场景实例（解析 / round-trip 测试）。
+4. [`cursor-handoff.md`](cursor-handoff.md)：实现顺序备忘。
 
 关键决策：
 

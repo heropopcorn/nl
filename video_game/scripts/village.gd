@@ -43,6 +43,7 @@ const PROP_LAYOUT: Array[Dictionary] = [
 @onready var hud: CanvasLayer = $HUD
 
 var editor: Node
+var director_active := false
 var using_custom_ground := false
 var using_custom_water := false
 var hide_baked_props := false
@@ -71,8 +72,8 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	var selftest := "--selftest" in args
 	var take_shot := "--screenshot" in args
-	if not selftest and not take_shot:
-		load_user_overrides()
+	if not selftest and editor and editor.has_method("boot"):
+		editor.call("boot")
 	print("Village ready — props spawned, water mask on, player at plaza.")
 	if selftest:
 		await get_tree().physics_frame
@@ -87,9 +88,7 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.physical_keycode == KEY_F1:
-			hint.visible = not hint.visible
-		elif event.physical_keycode == KEY_F3:
+		if event.physical_keycode == KEY_F3:
 			get_tree().debug_collisions_hint = not get_tree().debug_collisions_hint
 
 
@@ -262,7 +261,53 @@ func water_collision_count() -> int:
 	return _water_collision.get_child_count()
 
 
+func apply_director_image(image: Image, hide_props: bool) -> void:
+	apply_ground_image(image, false, hide_props)
+
+
+func load_approved_ground(hide_props: bool) -> void:
+	var player_uv := world_to_uv(player.position)
+	var old_size := terrain_size()
+	var tex := load(GROUND_PATH) as Texture2D
+	terrain.texture = tex
+	terrain.centered = true
+	using_custom_ground = false
+	set_hide_baked_props(hide_props)
+	_on_ground_size_changed(old_size)
+	player.position = uv_to_world(player_uv)
+
+
+func show_legacy_water(image: Image, flow_dir: Vector2) -> void:
+	if image == null:
+		hide_legacy_water()
+		return
+	_prepare_image(image)
+	_set_water_image(image, true)
+	water.visible = true
+	water.centered = true
+	water.z_index = -16
+	var mat: ShaderMaterial
+	if water.material is ShaderMaterial:
+		mat = (water.material as ShaderMaterial).duplicate() as ShaderMaterial
+	else:
+		mat = load("res://resources/water_flow_material.tres").duplicate() as ShaderMaterial
+	mat.set_shader_parameter("flow_dir", flow_dir)
+	mat.set_shader_parameter("director_time", -1.0)
+	water.material = mat
+	rebuild_water_collision()
+
+
+func hide_legacy_water() -> void:
+	water.visible = false
+	if _water_collision:
+		world.remove_child(_water_collision)
+		_water_collision.free()
+		_water_collision = null
+
+
 func persist_layout() -> void:
+	if director_active:
+		return
 	if editor and editor.has_method("write_layout"):
 		editor.write_layout()
 		return
@@ -358,9 +403,12 @@ func rebuild_map_bounds() -> void:
 
 
 func _setup_editor() -> void:
-	var script := load("res://scripts/runtime_editor.gd") as Script
+	director_active = true
+	hint.visible = false
+	hud.layer = 32
+	var script := load("res://scripts/director/director_desk.gd") as Script
 	editor = script.new()
-	editor.name = "RuntimeEditor"
+	editor.name = "DirectorDesk"
 	hud.add_child(editor)
 	editor.call("setup", self)
 
@@ -458,6 +506,8 @@ func _on_ground_size_changed(old_size: Vector2) -> void:
 	camera.offset = Vector2.ZERO
 	if _atlas_sheet:
 		_atlas_sheet.visible = not using_custom_ground
+	if director_active:
+		return
 	if water_image == null or water_image.get_width() != int(new_size.x) or water_image.get_height() != int(new_size.y):
 		if old_size == Vector2.ZERO or using_custom_ground:
 			_blank_water_image(new_size)
@@ -548,71 +598,25 @@ func _load_png(path: String) -> Image:
 
 func _run_selftest() -> int:
 	var errors: PackedStringArray = PackedStringArray()
-	var ground := Image.create(480, 320, false, Image.FORMAT_RGBA8)
-	ground.fill(Color(0.36, 0.52, 0.28, 1))
-	for x in 480:
-		for y in range(148, 172):
-			ground.set_pixel(x, y, Color(0.45, 0.34, 0.18, 1))
-	var note := apply_ground_image(ground, true, true)
-	print("selftest ground: ", note)
-	if terrain_size() != Vector2(480, 320):
-		errors.append("ground size expected 480x320, got %s" % terrain_size())
-	if not hide_baked_props:
-		errors.append("custom ground should hide baked props")
-	if not using_custom_ground:
-		errors.append("using_custom_ground should be true")
-	if not FileAccess.file_exists(SceneLayout.USER_GROUND):
-		errors.append("missing user://custom_ground.png")
-
-	var lake := PackedVector2Array([
-		Vector2(0.08, 0.12),
-		Vector2(0.42, 0.12),
-		Vector2(0.42, 0.48),
-		Vector2(0.08, 0.48),
-	])
-	fill_water_polygon_uv(lake, false)
-	if water_alpha_at_uv(Vector2(0.25, 0.30)) < 0.4:
-		errors.append("painted water alpha too low")
-	if water_alpha_at_uv(Vector2(0.80, 0.80)) > 0.05:
-		errors.append("unpainted water should stay empty")
-	if water_collision_count() < 1:
-		errors.append("expected water collision polygons")
-	if not FileAccess.file_exists(SceneLayout.USER_WATER):
-		errors.append("missing user://water_mask.png")
-	if DisplayServer.get_name() != "headless":
-		await _await_render()
-		_save_screenshot("village_custom_ground_water.png")
-
-	if editor and editor.has_method("set_path_uv"):
-		editor.set_path_uv([Vector2(0.18, 0.80), Vector2(0.82, 0.80)])
-	var start := player.position
-	var played: bool = editor.call("play_path") if editor else false
-	if not played:
-		errors.append("path play failed")
+	var director_test_script := load("res://scripts/director/director_selftest.gd") as Script
+	if director_test_script:
+		var director_test: Object = director_test_script.new()
+		var director_errors: PackedStringArray = director_test.run_model_and_repo()
+		for item in director_errors:
+			errors.append(item)
+		print("director model/repo selftest errors: ", director_errors.size())
 	else:
-		for _i in 24:
-			await get_tree().physics_frame
-		if player.position.distance_to(start) < 8.0:
-			errors.append("path playback did not move the player")
-		if player.collision_mask != 0:
-			errors.append("path playback should ignore collision")
-		if DisplayServer.get_name() != "headless":
-			await _await_render()
-			_save_screenshot("village_path_playing.png")
-		player.stop_path()
-		if player.is_playing_path():
-			errors.append("path should stop")
-		if player.collision_mask == 0:
-			errors.append("WASD collision mask should restore after path")
+		errors.append("missing director_selftest.gd")
 
-	reset_ground()
-	if using_custom_ground:
-		errors.append("reset_ground should restore approved terrain")
-	if hide_baked_props:
-		errors.append("reset_ground should show baked props")
-	if DisplayServer.get_name() != "headless":
-		await _await_render()
-		_save_screenshot("village_reset_approved.png")
+	if editor and editor.has_method("run_runtime_selftest"):
+		var runtime_errors: PackedStringArray = await editor.run_runtime_selftest()
+		for item in runtime_errors:
+			errors.append(item)
+		print("director runtime selftest errors: ", runtime_errors.size())
+	else:
+		errors.append("director desk runtime selftest missing")
+	if terrain.texture == null:
+		errors.append("village terrain texture missing")
 
 	if errors.is_empty():
 		print("SELFTEST PASS")

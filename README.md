@@ -14,7 +14,7 @@
 
 | 路径 | 是什么 | 怎么打开 |
 |------|--------|----------|
-| **`video_game/`** | **可玩村子沙盒**：走路、镜头缩放/平移、斜俯视房屋树木、水面流光与水体碰撞。来自 `heropopcorn/video_game` PR 分支。 | `cd video_game && godot --editor project.godot`，然后 F5。需要 Godot **4.7.x**。 |
+| **`video_game/`** | **可玩村子 + 导演台 P0**：走路、多场景、矩形水域、角色路线、下雨预览。来自 `heropopcorn/video_game` PR 分支并在本仓继续。 | `cd video_game && godot --editor project.godot`，然后 F5。需要 Godot **4.7.x**。 |
 | **`codex/asset-gen/godot/`** | **更新的生产资产静态预览**：透明 PNG sheet 摆在批准地皮上，没有玩法。不要用它替换 `video_game/`。 | `cd codex/asset-gen/godot && godot --editor project.godot`，然后 F5。需要 Godot **4.x**。 |
 
 `video_game/` 的 `project.godot` 在子目录根上，Godot 必须从该目录打开；`res://` 路径相对该根，不指向仓库顶层。
