@@ -1,0 +1,10 @@
+name: Godot Web export
+on:
+  workflow_dispatch:
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export Web build
+        run: bash tools/export_web.sh
