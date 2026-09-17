@@ -26,3 +26,8 @@ Thumbs.db
 tools/video-gen/.env
 !tools/video-gen/.env.example
 **/fal-veo/.env
+
+tools/audio-gen/.env
+!tools/audio-gen/.env.example
+
+video_game/export/

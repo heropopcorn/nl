@@ -34,6 +34,11 @@
 | `share/` | ChatGPT 分享页相关材料 |
 | `notes/` | 问题与备注 |
 
+## 语音合成（Fish Audio）
+
+脚本与说明：[`tools/audio-gen/`](tools/audio-gen/) · [`docs/fish-audio-tts.md`](docs/fish-audio-tts.md)  
+需自备 `FISH_API_KEY`（https://fish.audio/app/api-keys），勿提交密钥。
+
 ## 图生视频（fal Veo）
 
 脚本与说明：[`tools/video-gen/`](tools/video-gen/) · [`docs/video-generation-fal-veo.md`](docs/video-generation-fal-veo.md)  
