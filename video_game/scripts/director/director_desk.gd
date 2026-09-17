@@ -354,11 +354,16 @@ func _build_hud() -> void:
 	_canvas_catch.color = Color(0, 0, 0, 0)
 	_canvas_catch.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_canvas_catch.gui_input.connect(_on_canvas_gui_input)
+	_canvas_catch.z_index = 0
 	add_child(_canvas_catch)
 	_top = _chrome_panel()
 	_left = _chrome_panel()
 	_right = _chrome_panel()
 	_bottom = _chrome_panel()
+	_top.z_index = 4
+	_left.z_index = 4
+	_right.z_index = 4
+	_bottom.z_index = 4
 	add_child(_top)
 	add_child(_left)
 	add_child(_right)
