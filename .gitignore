@@ -5,7 +5,9 @@ video_game/build/
 
 # Local / secrets
 .env
-.env.*
+.env
+.env.local
+!.env.example
 *.pem
 **/credentials*
 **/*secret*
@@ -22,4 +24,5 @@ Thumbs.db
 
 # fal secrets
 tools/video-gen/.env
+!tools/video-gen/.env.example
 **/fal-veo/.env
