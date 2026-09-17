@@ -1,0 +1,10 @@
+.godot/
+.autoconverted/
+build/
+*.translation
+.DS_Store
+Thumbs.db
+__pycache__/
+*.pyc
+.env
+.env.*

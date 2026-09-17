@@ -1,6 +1,7 @@
 # Godot editor cache (assets stay under godot/assets/)
 **/.godot/
 *.translation
+video_game/build/
 
 # Local / secrets
 .env

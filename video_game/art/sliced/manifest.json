@@ -1,0 +1,302 @@
+[
+  {
+    "name": "house_blue_cottage",
+    "file": "art/sliced/house_blue_cottage.png",
+    "bbox": [
+      16,
+      0,
+      287,
+      239
+    ],
+    "centroid": [
+      149.75948854285352,
+      130.90122800354476
+    ],
+    "area": 39495
+  },
+  {
+    "name": "house_market",
+    "file": "art/sliced/house_market.png",
+    "bbox": [
+      301,
+      9,
+      574,
+      247
+    ],
+    "centroid": [
+      437.7803798588807,
+      136.55097240838623
+    ],
+    "area": 39541
+  },
+  {
+    "name": "house_round_green",
+    "file": "art/sliced/house_round_green.png",
+    "bbox": [
+      593,
+      0,
+      817,
+      240
+    ],
+    "centroid": [
+      702.8725255601479,
+      143.5044231745341
+    ],
+    "area": 27582
+  },
+  {
+    "name": "house_watermill",
+    "file": "art/sliced/house_watermill.png",
+    "bbox": [
+      836,
+      0,
+      1132,
+      255
+    ],
+    "centroid": [
+      981.2436897052993,
+      139.5652614422272
+    ],
+    "area": 45402
+  },
+  {
+    "name": "tree_oak",
+    "file": "art/sliced/tree_oak.png",
+    "bbox": [
+      11,
+      231,
+      287,
+      465
+    ],
+    "centroid": [
+      131.14791920598992,
+      350.81177085147135
+    ],
+    "area": 34458
+  },
+  {
+    "name": "tree_cherry",
+    "file": "art/sliced/tree_cherry.png",
+    "bbox": [
+      257,
+      236,
+      476,
+      458
+    ],
+    "centroid": [
+      366.4730439789822,
+      346.3771323688188
+    ],
+    "area": 27786
+  },
+  {
+    "name": "tree_pine",
+    "file": "art/sliced/tree_pine.png",
+    "bbox": [
+      490,
+      226,
+      669,
+      456
+    ],
+    "centroid": [
+      575.0215549464241,
+      371.5486543732868
+    ],
+    "area": 16052
+  },
+  {
+    "name": "windmill",
+    "file": "art/sliced/windmill.png",
+    "bbox": [
+      694,
+      233,
+      899,
+      460
+    ],
+    "centroid": [
+      794.0769995443814,
+      363.1544961272418
+    ],
+    "area": 24143
+  },
+  {
+    "name": "well",
+    "file": "art/sliced/well.png",
+    "bbox": [
+      921,
+      257,
+      1126,
+      465
+    ],
+    "centroid": [
+      1022.1201373495023,
+      374.5466162472291
+    ],
+    "area": 23007
+  },
+  {
+    "name": "bridge_stone",
+    "file": "art/sliced/bridge_stone.png",
+    "bbox": [
+      0,
+      492,
+      265,
+      645
+    ],
+    "centroid": [
+      127.25024652962148,
+      569.2084882045058
+    ],
+    "area": 26366
+  },
+  {
+    "name": "signboard",
+    "file": "art/sliced/signboard.png",
+    "bbox": [
+      260,
+      463,
+      420,
+      644
+    ],
+    "centroid": [
+      338.93194977928107,
+      557.3515450323912
+    ],
+    "area": 17443
+  },
+  {
+    "name": "lamppost",
+    "file": "art/sliced/lamppost.png",
+    "bbox": [
+      427,
+      453,
+      552,
+      645
+    ],
+    "centroid": [
+      491.7225491083552,
+      563.409703992034
+    ],
+    "area": 11047
+  },
+  {
+    "name": "garden_plot",
+    "file": "art/sliced/garden_plot.png",
+    "bbox": [
+      551,
+      468,
+      867,
+      666
+    ],
+    "centroid": [
+      709.2134664764621,
+      566.6934094151212
+    ],
+    "area": 35050
+  },
+  {
+    "name": "coop",
+    "file": "art/sliced/coop.png",
+    "bbox": [
+      853,
+      459,
+      1151,
+      672
+    ],
+    "centroid": [
+      995.8517205602628,
+      575.3801083635944
+    ],
+    "area": 34698
+  },
+  {
+    "name": "cart",
+    "file": "art/sliced/cart.png",
+    "bbox": [
+      4,
+      651,
+      219,
+      831
+    ],
+    "centroid": [
+      110.15077671560259,
+      745.5014936838511
+    ],
+    "area": 23432
+  },
+  {
+    "name": "crates_still_life",
+    "file": "art/sliced/crates_still_life.png",
+    "bbox": [
+      218,
+      655,
+      438,
+      831
+    ],
+    "centroid": [
+      325.1354188986501,
+      750.6231412041997
+    ],
+    "area": 23335
+  },
+  {
+    "name": "flowers_white_a",
+    "file": "art/sliced/flowers_white_a.png",
+    "bbox": [
+      441,
+      686,
+      603,
+      822
+    ],
+    "centroid": [
+      518.6186476270475,
+      762.9216295674087
+    ],
+    "area": 11905
+  },
+  {
+    "name": "flowers_white_b",
+    "file": "art/sliced/flowers_white_b.png",
+    "bbox": [
+      608,
+      684,
+      775,
+      825
+    ],
+    "centroid": [
+      690.7625668449198,
+      762.2453017570665
+    ],
+    "area": 13090
+  },
+  {
+    "name": "flowers_blue",
+    "file": "art/sliced/flowers_blue.png",
+    "bbox": [
+      782,
+      672,
+      954,
+      828
+    ],
+    "centroid": [
+      866.9955519861618,
+      755.1094705627974
+    ],
+    "area": 16187
+  },
+  {
+    "name": "flowers_pink",
+    "file": "art/sliced/flowers_pink.png",
+    "bbox": [
+      960,
+      676,
+      1142,
+      831
+    ],
+    "centroid": [
+      1049.965295402231,
+      760.3386649353715
+    ],
+    "area": 16943
+  }
+]

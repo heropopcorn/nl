@@ -1,0 +1,6 @@
+{
+  "buildCommand": "bash tools/export_web.sh",
+  "outputDirectory": "build/web",
+  "installCommand": "true",
+  "framework": null
+}
