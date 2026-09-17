@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "project": "Yuanli static asset generation v1",
+  "camera_modes": {
+    "PORTRAIT_STATIC": "Front or gentle 3/4-front full-body static character cutout",
+    "TOP_OBLIQUE": "Fixed top-down isometric / orthographic-oblique independent world asset"
+  },
+  "crop_note": "Boxes are nominal equal-grid cells in source pixels. Transparent gutters are intentionally preserved; trim alpha after extraction only if desired.",
+  "assets": [
+    {
+      "file": "characters/characters-leads-teachers-sheet.png",
+      "size": [1536, 1024],
+      "camera_mode": "PORTRAIT_STATIC",
+      "grid": {"columns": 4, "rows": 2, "cell": [384, 512]},
+      "items": [
+        {"id": "male_lead_child", "box": [0, 0, 384, 512]},
+        {"id": "female_lead_child_ordinary", "box": [384, 0, 384, 512]},
+        {"id": "female_lead_child_refined", "box": [768, 0, 384, 512]},
+        {"id": "male_teacher_nature", "box": [1152, 0, 384, 512]},
+        {"id": "male_teacher_measurement", "box": [0, 512, 384, 512]},
+        {"id": "female_teacher_basic", "box": [384, 512, 384, 512]},
+        {"id": "female_teacher_senior", "box": [768, 512, 384, 512]},
+        {"id": "classmate_cheerful_boy", "box": [1152, 512, 384, 512]}
+      ]
+    },
+    {
+      "file": "characters/characters-classmates-sheet.png",
+      "size": [1024, 1536],
+      "camera_mode": "PORTRAIT_STATIC",
+      "grid": {"columns": 3, "rows": 2, "cell_approx": [341.333, 768]},
+      "items": [
+        {"id": "classmate_stocky_boy", "box": [0, 0, 341, 768]},
+        {"id": "classmate_quiet_boy", "box": [341, 0, 341, 768]},
+        {"id": "classmate_energetic_girl", "box": [682, 0, 342, 768]},
+        {"id": "classmate_active_boy", "box": [0, 768, 341, 768]},
+        {"id": "classmate_braided_girl", "box": [341, 768, 341, 768]},
+        {"id": "classmate_studious_boy", "box": [682, 768, 342, 768]}
+      ]
+    },
+    {
+      "file": "props/nature-sheet.png",
+      "size": [1448, 1086],
+      "camera_mode": "TOP_OBLIQUE",
+      "grid": {"columns": 4, "rows": 3, "cell": [362, 362]},
+      "items": ["broadleaf_tree_a", "broadleaf_tree_b", "broadleaf_tree_c", "flowering_tree", "bamboo_cluster", "white_flower_shrub", "yellow_flower_shrub", "daisy_clump", "blue_flower_clump", "rock_cluster_a", "rock_cluster_b", "rock_cluster_c"]
+    },
+    {
+      "file": "props/village-props-sheet.png",
+      "size": [1448, 1086],
+      "camera_mode": "TOP_OBLIQUE",
+      "grid": {"columns": 4, "rows": 3, "cell": [362, 362]},
+      "items": ["roofed_stone_well", "lamp_post_vine", "lamp_post_plain", "crate_stack_apples", "crate_stack_carrots", "crate_stack_sacks", "barrels_upright", "barrels_mixed", "notice_board", "handcart_sacks", "water_jars", "fence_gate"]
+    },
+    {
+      "file": "props/modest-houses-sheet.png",
+      "size": [1774, 887],
+      "camera_mode": "TOP_OBLIQUE",
+      "grid": {"columns": 2, "rows": 1, "cell": [887, 887]},
+      "items": [
+        {"id": "modest_house_blue_roof", "box": [0, 0, 887, 887]},
+        {"id": "modest_house_clay_roof", "box": [887, 0, 887, 887]}
+      ]
+    }
+  ],
+  "alpha_validation": {
+    "method": "PNG signature + IHDR RGBA color type + Pillow alpha histogram",
+    "all_files_rgba": true,
+    "all_files_have_zero_alpha_pixels": true
+  }
+}

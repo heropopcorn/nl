@@ -1,0 +1,5 @@
+xhs01_ai_2d_game.mp4	2026-07-15_12.08.57_Alpha_AI_如何0成本用AI制作整套2D游戏.mp4
+xhs02_godot_tilemap.mp4	2026-08-18_11.43.19_Dr_c_Godot0基础教学-tilemep瓦片地图第二期.mp4
+xhs03_milki_delivery.mp4	2026-09-02_04.39.02_游研社_乡村小镇生活游戏《Milki_Delivery》.mp4
+xhs04_codex_godot_ep7.mp4	2026-09-06_15.12.52_明鬼studio_Codex_Godot的游戏实验第7期，GPT-6_Astra.mp4
+xhs05_unity_godot_dev.mp4	2026-09-12_13.03.04_unity_godot_开发者_6aa54d88000000002502cab0.mp4

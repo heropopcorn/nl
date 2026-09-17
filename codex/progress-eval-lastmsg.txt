@@ -1,0 +1,5 @@
+已完整阅读 5,919 行原始资料，并覆盖更新：
+
+[codex/progress-eval.md](/workspace/yuanli-game-video/codex/progress-eval.md)
+
+内容已按“已完成 / 进行中 / 最新问题 / 建议下一步”整理，并区分了现行设定、已废弃方案及图片回合无法核实的内容。

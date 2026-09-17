@@ -1,0 +1,36 @@
+1
+00:00:00,000 --> 00:00:04,000
+Milky Delivery is a short but satisfying adventure game.
+
+2
+00:00:04,000 --> 00:00:09,000
+You play as Neha, a young bike courier, travelling across beautiful landscapes.
+
+3
+00:00:09,000 --> 00:00:13,000
+Deliver milk to a bunch of friendly villagers.
+
+4
+00:00:13,000 --> 00:00:17,000
+Take care of your pet car milky and heal the community.
+
+5
+00:00:17,000 --> 00:00:23,000
+Upgrade your bike to travel faster and farther to new destinations.
+
+6
+00:00:23,000 --> 00:00:29,000
+Manage your resources and experiment with different flavors like strawberry or milk tea.
+
+7
+00:00:29,000 --> 00:00:35,000
+With each delivery, you learn more about the region, its people, and what happened to all the other cows.
+
+8
+00:00:35,000 --> 00:00:42,000
+The demo is now live on Steam, so if you want to support us, go check it out and wishlist the game.
+
+9
+00:00:42,000 --> 00:00:44,000
+Merci!
+
