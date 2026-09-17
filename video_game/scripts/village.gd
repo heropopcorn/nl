@@ -548,6 +548,16 @@ func _load_png(path: String) -> Image:
 
 func _run_selftest() -> int:
 	var errors: PackedStringArray = PackedStringArray()
+	var director_test_script := load("res://scripts/director/director_selftest.gd") as Script
+	if director_test_script:
+		var director_test: Object = director_test_script.new()
+		var director_errors: PackedStringArray = director_test.run_model_and_repo()
+		for item in director_errors:
+			errors.append(item)
+		print("director model/repo selftest errors: ", director_errors.size())
+	else:
+		errors.append("missing director_selftest.gd")
+
 	var ground := Image.create(480, 320, false, Image.FORMAT_RGBA8)
 	ground.fill(Color(0.36, 0.52, 0.28, 1))
 	for x in 480:
