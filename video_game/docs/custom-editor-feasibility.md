@@ -1,5 +1,7 @@
 # 自定义背景 / 水域 / 路径 — 可行性评估
 
+> **MVP 状态（已实现）：** Godot 运行时编辑器在 `scripts/runtime_editor.gd`。操作说明见 [`custom-editor-mvp.md`](custom-editor-mvp.md)。覆盖只写 `user://`。未做分段流向、写回 `res://`、独立网页编辑器。
+
 评估对象：公开仓 `heropopcorn/nl` 里的可玩 Godot 工程 `video_game/`（Godot 4.7.2）。  
 **不**使用私有仓 `heropopcorn/video_game`。不改 `codex/asset-gen/` 与已锁定美术树。
 

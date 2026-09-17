@@ -12,7 +12,7 @@ config_version=5
 
 config/name="video_game"
 config/description="Art and tech experiments for a hand-painted fantasy farm village."
-config/version="0.1.0"
+config/version="0.2.0"
 run/main_scene="res://scenes/village/village.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://icon.svg"

@@ -39,6 +39,6 @@ theme_override_colors/font_color = Color(0.98, 0.95, 0.86, 1)
 theme_override_colors/font_outline_color = Color(0.2, 0.14, 0.08, 1)
 theme_override_constants/outline_size = 6
 theme_override_font_sizes/font_size = 18
-text = "WASD / arrows walk   Shift sprint
-Wheel or +/- zoom   Right/middle-drag pan   C recenter
-F1 hide this   F3 collision debug   Atlas is to the right of the map"
+text = "WASD walk (default)  Shift sprint  P play/stop path
+1 Play  2 Water  3 Path  B load PNG  Right-drag pan
+F1 hide this  F3 collision  Editor panel is on the right"
