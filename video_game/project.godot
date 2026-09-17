@@ -24,11 +24,6 @@ window/size/viewport_height=1080
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
-[layer_names]
-
-2d_physics/layer_1="world"
-2d_physics/layer_2="player"
-
 [physics]
 
 2d/default_gravity=0.0
@@ -37,3 +32,9 @@ window/stretch/aspect="expand"
 
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
+textures/canvas_textures/default_texture_filter=1
+
+[layer_names]
+
+2d_physics/layer_1="world"
+2d_physics/layer_2="player"

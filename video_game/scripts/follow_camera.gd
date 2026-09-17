@@ -6,17 +6,19 @@ extends Camera2D
 
 var _dragging := false
 
+
 func _ready() -> void:
 	make_current()
 	position_smoothing_enabled = true
 	position_smoothing_speed = 6.0
+
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			_nudge_zoom(zoom_step)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_nudge_zoom( - zoom_step)
+			_nudge_zoom(-zoom_step)
 		elif event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT:
 			_dragging = true
 			get_viewport().set_input_as_handled()
@@ -31,9 +33,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_EQUAL, KEY_KP_ADD:
 				_nudge_zoom(zoom_step)
 			KEY_MINUS, KEY_KP_SUBTRACT:
-				_nudge_zoom( - zoom_step)
+				_nudge_zoom(-zoom_step)
 			KEY_C, KEY_HOME:
 				offset = Vector2.ZERO
+
 
 func _nudge_zoom(amount: float) -> void:
 	var next := clampf(zoom.x + amount, min_zoom, max_zoom)

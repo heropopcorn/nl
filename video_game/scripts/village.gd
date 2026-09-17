@@ -1,28 +1,32 @@
 extends Node2D
 
+## First village sandbox: orthographic ground + a few isometric atlas props.
+
 const GROUND_PATH := "res://art/approved/chatgpt-terrain-ground-approved.png"
 const WATER_MASK_PATH := "res://art/generated/water_mask.png"
 const ATLAS_PATH := "res://art/approved/chatgpt-terrain-assets-approved.png"
 const SLICED_DIR := "res://art/sliced/"
 
+# UV is top-left origin on the terrain texture. Feet sit on the node origin.
+# Garden plots and the stone bridge are skipped — the ground map already paints them.
 const PROP_LAYOUT: Array[Dictionary] = [
-	{"name": "house_blue_cottage", "uv": Vector2(0.2, 0.33), "scale": 0.48, "radius": 34.0}, 
-	{"name": "house_market", "uv": Vector2(0.36, 0.18), "scale": 0.46, "radius": 32.0}, 
-	{"name": "house_round_green", "uv": Vector2(0.54, 0.2), "scale": 0.42, "radius": 28.0}, 
-	{"name": "house_watermill", "uv": Vector2(0.07, 0.8), "scale": 0.42, "radius": 32.0}, 
-	{"name": "windmill", "uv": Vector2(0.9, 0.34), "scale": 0.4, "radius": 28.0}, 
-	{"name": "tree_oak", "uv": Vector2(0.27, 0.52), "scale": 0.5, "radius": 22.0}, 
-	{"name": "tree_pine", "uv": Vector2(0.86, 0.52), "scale": 0.46, "radius": 18.0}, 
-	{"name": "well", "uv": Vector2(0.62, 0.7), "scale": 0.4, "radius": 16.0}, 
-	{"name": "signboard", "uv": Vector2(0.4, 0.4), "scale": 0.38, "radius": 12.0}, 
-	{"name": "lamppost", "uv": Vector2(0.5, 0.46), "scale": 0.36, "radius": 8.0}, 
-	{"name": "coop", "uv": Vector2(0.18, 0.9), "scale": 0.38, "radius": 26.0}, 
-	{"name": "cart", "uv": Vector2(0.42, 0.66), "scale": 0.4, "radius": 18.0}, 
-	{"name": "crates_still_life", "uv": Vector2(0.52, 0.62), "scale": 0.36, "radius": 16.0}, 
-	{"name": "flowers_white_a", "uv": Vector2(0.18, 0.6), "scale": 0.34, "radius": 0.0}, 
-	{"name": "flowers_white_b", "uv": Vector2(0.72, 0.58), "scale": 0.32, "radius": 0.0}, 
-	{"name": "flowers_blue", "uv": Vector2(0.9, 0.72), "scale": 0.34, "radius": 0.0}, 
-	{"name": "flowers_pink", "uv": Vector2(0.56, 0.84), "scale": 0.34, "radius": 0.0}, 
+	{"name": "house_blue_cottage", "uv": Vector2(0.20, 0.33), "scale": 0.48, "radius": 34.0},
+	{"name": "house_market", "uv": Vector2(0.36, 0.18), "scale": 0.46, "radius": 32.0},
+	{"name": "house_round_green", "uv": Vector2(0.54, 0.20), "scale": 0.42, "radius": 28.0},
+	{"name": "house_watermill", "uv": Vector2(0.07, 0.80), "scale": 0.42, "radius": 32.0},
+	{"name": "windmill", "uv": Vector2(0.90, 0.34), "scale": 0.40, "radius": 28.0},
+	{"name": "tree_oak", "uv": Vector2(0.27, 0.52), "scale": 0.50, "radius": 22.0},
+	{"name": "tree_pine", "uv": Vector2(0.86, 0.52), "scale": 0.46, "radius": 18.0},
+	{"name": "well", "uv": Vector2(0.62, 0.70), "scale": 0.40, "radius": 16.0},
+	{"name": "signboard", "uv": Vector2(0.40, 0.40), "scale": 0.38, "radius": 12.0},
+	{"name": "lamppost", "uv": Vector2(0.50, 0.46), "scale": 0.36, "radius": 8.0},
+	{"name": "coop", "uv": Vector2(0.18, 0.90), "scale": 0.38, "radius": 26.0},
+	{"name": "cart", "uv": Vector2(0.42, 0.66), "scale": 0.40, "radius": 18.0},
+	{"name": "crates_still_life", "uv": Vector2(0.52, 0.62), "scale": 0.36, "radius": 16.0},
+	{"name": "flowers_white_a", "uv": Vector2(0.18, 0.60), "scale": 0.34, "radius": 0.0},
+	{"name": "flowers_white_b", "uv": Vector2(0.72, 0.58), "scale": 0.32, "radius": 0.0},
+	{"name": "flowers_blue", "uv": Vector2(0.90, 0.72), "scale": 0.34, "radius": 0.0},
+	{"name": "flowers_pink", "uv": Vector2(0.56, 0.84), "scale": 0.34, "radius": 0.0},
 ]
 
 @onready var world: Node2D = $World
@@ -31,6 +35,7 @@ const PROP_LAYOUT: Array[Dictionary] = [
 @onready var player: CharacterBody2D = $World/Player
 @onready var camera: Camera2D = $World/Player/Camera2D
 @onready var hint: Label = $HUD/ControlsHint
+
 
 func _ready() -> void:
 	_bind_terrain()
@@ -47,6 +52,7 @@ func _ready() -> void:
 		_save_screenshot()
 		get_tree().quit()
 
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.physical_keycode == KEY_F1:
@@ -54,12 +60,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.physical_keycode == KEY_F3:
 			get_tree().debug_collisions_hint = not get_tree().debug_collisions_hint
 
+
 func _bind_terrain() -> void:
 	if terrain.texture == null:
 		terrain.texture = load(GROUND_PATH)
 	terrain.centered = true
 	terrain.z_index = -20
 	terrain.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+
 
 func _bind_water() -> void:
 	var mask := load(WATER_MASK_PATH) as Texture2D
@@ -73,9 +81,10 @@ func _bind_water() -> void:
 		water.material = load("res://resources/water_flow_material.tres")
 	water.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 
+
 func _place_props() -> void:
 	var ground_size := terrain.texture.get_size()
-	var origin := - ground_size * 0.5
+	var origin := -ground_size * 0.5
 	for item in PROP_LAYOUT:
 		var prop_name := str(item["name"])
 		var uv: Vector2 = item["uv"]
@@ -91,7 +100,7 @@ func _place_props() -> void:
 		var sprite := Sprite2D.new()
 		sprite.texture = tex
 		sprite.centered = false
-		sprite.offset = Vector2( - tex.get_width() * 0.5, - float(tex.get_height()))
+		sprite.offset = Vector2(-tex.get_width() * 0.5, -float(tex.get_height()))
 		sprite.scale = Vector2.ONE * prop_scale
 		sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 		node.add_child(sprite)
@@ -104,6 +113,7 @@ func _place_props() -> void:
 			node.add_child(collision)
 		world.add_child(node)
 
+
 func _place_reference_atlas() -> void:
 	var sheet := Sprite2D.new()
 	sheet.name = "ApprovedAtlasReference"
@@ -112,6 +122,7 @@ func _place_reference_atlas() -> void:
 	sheet.position = Vector2(terrain.texture.get_size().x * 0.5 + sheet.texture.get_width() * 0.5 + 96.0, 0.0)
 	sheet.modulate = Color(1, 1, 1, 0.92)
 	world.add_child(sheet)
+
 
 func _build_water_collision() -> void:
 	var image := _load_png(WATER_MASK_PATH)
@@ -125,7 +136,7 @@ func _build_water_collision() -> void:
 	body.name = "WaterCollision"
 	body.collision_layer = 1
 	body.collision_mask = 0
-	var origin := - Vector2(image.get_width(), image.get_height()) * 0.5
+	var origin := -Vector2(image.get_width(), image.get_height()) * 0.5
 	for poly in polygons:
 		if poly.size() < 3:
 			continue
@@ -143,16 +154,17 @@ func _build_water_collision() -> void:
 			body.add_child(cs)
 	world.add_child(body)
 
+
 func _build_map_bounds() -> void:
 	var size := terrain.texture.get_size()
 	var body := StaticBody2D.new()
 	body.name = "MapBounds"
 	var thickness := 48.0
 	var rects := [
-		Rect2( - size.x * 0.5 - thickness, - size.y * 0.5 - thickness, size.x + thickness * 2.0, thickness), 
-		Rect2( - size.x * 0.5 - thickness, size.y * 0.5, size.x + thickness * 2.0, thickness), 
-		Rect2( - size.x * 0.5 - thickness, - size.y * 0.5, thickness, size.y), 
-		Rect2(size.x * 0.5, - size.y * 0.5, thickness, size.y), 
+		Rect2(-size.x * 0.5 - thickness, -size.y * 0.5 - thickness, size.x + thickness * 2.0, thickness),
+		Rect2(-size.x * 0.5 - thickness, size.y * 0.5, size.x + thickness * 2.0, thickness),
+		Rect2(-size.x * 0.5 - thickness, -size.y * 0.5, thickness, size.y),
+		Rect2(size.x * 0.5, -size.y * 0.5, thickness, size.y),
 	]
 	for rect in rects:
 		var cs := CollisionShape2D.new()
@@ -163,10 +175,12 @@ func _build_map_bounds() -> void:
 		body.add_child(cs)
 	world.add_child(body)
 
+
 func _place_player() -> void:
 	var size := terrain.texture.get_size()
+	# Center medallion / plaza on the approved ground map.
+	player.position = -size * 0.5 + Vector2(size.x * 0.42, size.y * 0.42)
 
-	player.position = - size * 0.5 + Vector2(size.x * 0.42, size.y * 0.42)
 
 func _limit_camera() -> void:
 	var size := terrain.texture.get_size()
@@ -174,11 +188,12 @@ func _limit_camera() -> void:
 	var extra_right := 0.0
 	if atlas:
 		extra_right = atlas.get_width() + 120.0
-	camera.limit_left = int( - size.x * 0.5)
-	camera.limit_top = int( - size.y * 0.5)
+	camera.limit_left = int(-size.x * 0.5)
+	camera.limit_top = int(-size.y * 0.5)
 	camera.limit_right = int(size.x * 0.5 + extra_right)
 	camera.limit_bottom = int(size.y * 0.5)
 	camera.limit_smoothed = true
+
 
 func _save_screenshot() -> void:
 	var image := get_viewport().get_texture().get_image()
@@ -186,6 +201,7 @@ func _save_screenshot() -> void:
 	image.save_png(path)
 	var abs_path := ProjectSettings.globalize_path(path)
 	print("Wrote screenshot ", abs_path)
+
 
 func _load_png(res_path: String) -> Image:
 	var abs_path := ProjectSettings.globalize_path(res_path)

@@ -1,9 +1,9 @@
 [gd_resource type="ShaderMaterial" format=3 uid="uid://bwaterflow01"]
 
-[ext_resource type="Shader" uid="uid://b7vlet8ug3xld" path="res://shaders/water_flow.gdshader" id="1"]
+[ext_resource type="Shader" path="res://shaders/water_flow.gdshader" id="1_shader"]
 
 [resource]
-shader = ExtResource("1")
+shader = ExtResource("1_shader")
 shader_parameter/flow_speed = 0.22
 shader_parameter/tint = Color(0.42, 0.76, 0.92, 0.5)
 shader_parameter/flow_dir = Vector2(0.18, 0.92)

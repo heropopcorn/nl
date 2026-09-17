@@ -1,10 +1,25 @@
+# Godot 4+
 .godot/
-.autoconverted/
-build/
+/android/
+export/*
+!export/.gdignore
 *.translation
+
+# OS / editor
 .DS_Store
-Thumbs.db
+*~
+*.swp
+.vscode/
+.idea/
+
+# Local Godot editor binary (do not vendor)
+/tools/godot*
+/Godot_*
+
+# Vercel CLI link (project is linked via GitHub)
+.vercel/
+
+# Python
 __pycache__/
 *.pyc
-.env
-.env.*
+.venv/

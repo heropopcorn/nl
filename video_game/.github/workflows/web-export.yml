@@ -1,10 +1,30 @@
-name: Godot Web export
+name: web-export
+
 on:
-  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
 jobs:
-  export:
+  export-web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Export Web build
-        run: bash tools/export_web.sh
+
+      - name: Cache Godot editor + templates
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/godot-web-export
+            ~/.local/share/godot/export_templates
+          key: godot-4.7.2-web-${{ runner.os }}
+
+      - name: Export HTML5 (single-threaded)
+        run: bash tools/export-web.sh
+
+      - name: Upload static site
+        uses: actions/upload-artifact@v4
+        with:
+          name: village-web
+          path: export/web
+          if-no-files-found: error

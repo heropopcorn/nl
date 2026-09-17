@@ -8,7 +8,7 @@
 
 教学成长向「元力」幻想乡村 2D 游戏视频管线的工作区：锁定美术与设定、角色设定板、透明底可切分资产、**可玩的 Godot 村子沙盒**、Godot 4 静态资产预览、小红书参考图文，以及进度评估笔记。
 
-**本仓是今后的交接 mono-repo**（资产/设定 + 真正可玩的 Godot 工程）。私有仓 https://github.com/heropopcorn/video_game 仅作历史备份；其 `main` 几乎是空 README，完整游戏代码在分支 `cursor/godot-village-scene-9de4`（PR #1），现已落入本仓 `video_game/`。
+**本仓是今后的交接 mono-repo**（资产/设定 + 真正可玩的 Godot 工程）。私有仓 https://github.com/heropopcorn/video_game 仅作历史备份；其 `main` 几乎是空 README，完整游戏代码在分支 `cursor/godot-village-scene-9de4`（PR #1）。`video_game/` 现为该分支的 **GitHub zipball 真源码**（commit `b28d4d3`），不是 Vercel Web 导出重建版。
 
 ## 两套 Godot 工程（都要保留）
 

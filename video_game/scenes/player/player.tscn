@@ -1,28 +1,29 @@
-[gd_scene format=3 uid="uid://cplayerwalk01"]
+[gd_scene load_steps=5 format=3 uid="uid://cplayerwalk01"]
 
-[ext_resource type="Script" uid="uid://dmkei7fsaumdj" path="res://scripts/player.gd" id="1"]
-[ext_resource type="Texture2D" uid="uid://cfp87h24c1ujy" path="res://art/generated/player_placeholder.png" id="2"]
-[ext_resource type="Script" uid="uid://bge3jb0aqa0l1" path="res://scripts/follow_camera.gd" id="3"]
+[ext_resource type="Script" path="res://scripts/player.gd" id="1_player"]
+[ext_resource type="Texture2D" path="res://art/generated/player_placeholder.png" id="2_tex"]
+[ext_resource type="Script" path="res://scripts/follow_camera.gd" id="3_cam"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_feet"]
 radius = 18.0
 
-[node name="Player" type="CharacterBody2D" unique_id=1301736047]
+[node name="Player" type="CharacterBody2D"]
 collision_layer = 2
+collision_mask = 1
 motion_mode = 1
-script = ExtResource("1")
+script = ExtResource("1_player")
 
-[node name="Sprite2D" type="Sprite2D" parent="." unique_id=478994796]
-texture_filter = 1
+[node name="Sprite2D" type="Sprite2D" parent="."]
 scale = Vector2(0.82, 0.82)
-texture = ExtResource("2")
+texture = ExtResource("2_tex")
 offset = Vector2(0, -46)
+texture_filter = 1
 
-[node name="CollisionShape2D" type="CollisionShape2D" parent="." unique_id=1432341753]
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 shape = SubResource("CircleShape2D_feet")
 
-[node name="Camera2D" type="Camera2D" parent="." unique_id=598364249]
+[node name="Camera2D" type="Camera2D" parent="."]
 zoom = Vector2(1.35, 1.35)
 position_smoothing_enabled = true
 position_smoothing_speed = 6.0
-script = ExtResource("3")
+script = ExtResource("3_cam")

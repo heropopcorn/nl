@@ -1,36 +1,36 @@
-[gd_scene format=3 uid="uid://bvillage001"]
+[gd_scene load_steps=6 format=3 uid="uid://bvillage001"]
 
-[ext_resource type="Script" uid="uid://d1cm41rdf0xyw" path="res://scripts/village.gd" id="1"]
-[ext_resource type="Texture2D" uid="uid://dirs27oxvt7b6" path="res://art/approved/chatgpt-terrain-ground-approved.png" id="2"]
-[ext_resource type="Material" uid="uid://bwaterflow01" path="res://resources/water_flow_material.tres" id="3"]
-[ext_resource type="Texture2D" uid="uid://omo0hg7elhs1" path="res://art/generated/water_mask.png" id="4"]
-[ext_resource type="PackedScene" uid="uid://cplayerwalk01" path="res://scenes/player/player.tscn" id="5"]
+[ext_resource type="Script" path="res://scripts/village.gd" id="1_village"]
+[ext_resource type="Texture2D" path="res://art/approved/chatgpt-terrain-ground-approved.png" id="2_ground"]
+[ext_resource type="Texture2D" path="res://art/generated/water_mask.png" id="3_water"]
+[ext_resource type="Material" path="res://resources/water_flow_material.tres" id="4_water_mat"]
+[ext_resource type="PackedScene" path="res://scenes/player/player.tscn" id="5_player"]
 
-[node name="Village" type="Node2D" unique_id=2022293166]
-script = ExtResource("1")
+[node name="Village" type="Node2D"]
+script = ExtResource("1_village")
 
-[node name="World" type="Node2D" parent="." unique_id=1146885508]
+[node name="World" type="Node2D" parent="."]
 y_sort_enabled = true
 
-[node name="Terrain" type="Sprite2D" parent="World" unique_id=1946071948]
+[node name="Terrain" type="Sprite2D" parent="World"]
 z_index = -20
 texture_filter = 1
-texture = ExtResource("2")
+texture = ExtResource("2_ground")
 
-[node name="WaterOverlay" type="Sprite2D" parent="World" unique_id=611520268]
+[node name="WaterOverlay" type="Sprite2D" parent="World"]
 z_index = -15
 texture_filter = 1
-material = ExtResource("3")
-texture = ExtResource("4")
+material = ExtResource("4_water_mat")
+texture = ExtResource("3_water")
 
-[node name="Props" type="Node2D" parent="World" unique_id=1596131361]
+[node name="Props" type="Node2D" parent="World"]
 y_sort_enabled = true
 
-[node name="Player" parent="World" unique_id=819306956 instance=ExtResource("5")]
+[node name="Player" parent="World" instance=ExtResource("5_player")]
 
-[node name="HUD" type="CanvasLayer" parent="." unique_id=1663075491]
+[node name="HUD" type="CanvasLayer" parent="."]
 
-[node name="ControlsHint" type="Label" parent="HUD" unique_id=2016043892]
+[node name="ControlsHint" type="Label" parent="HUD"]
 offset_left = 24.0
 offset_top = 20.0
 offset_right = 760.0

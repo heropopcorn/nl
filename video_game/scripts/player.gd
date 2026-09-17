@@ -7,10 +7,12 @@ const SPRINT_SPEED := 320.0
 
 var _base_offset := Vector2.ZERO
 
+
 func _ready() -> void:
 	_ensure_move_actions()
 	motion_mode = MOTION_MODE_FLOATING
 	_base_offset = sprite.offset
+
 
 func _physics_process(_delta: float) -> void:
 	var direction := Input.get_vector("move_left", "move_right", "move_up", "move_down")
@@ -23,12 +25,13 @@ func _physics_process(_delta: float) -> void:
 	else:
 		sprite.offset.y = _base_offset.y
 
+
 func _ensure_move_actions() -> void:
 	var mapping := {
-		"move_left": [KEY_A, KEY_LEFT], 
-		"move_right": [KEY_D, KEY_RIGHT], 
-		"move_up": [KEY_W, KEY_UP], 
-		"move_down": [KEY_S, KEY_DOWN], 
+		"move_left": [KEY_A, KEY_LEFT],
+		"move_right": [KEY_D, KEY_RIGHT],
+		"move_up": [KEY_W, KEY_UP],
+		"move_down": [KEY_S, KEY_DOWN],
 	}
 	for action in mapping:
 		if not InputMap.has_action(action):
