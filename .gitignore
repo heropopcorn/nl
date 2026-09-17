@@ -19,3 +19,7 @@ Thumbs.db
 
 # Codex transient
 **/lastmsg.txt
+
+# fal secrets
+tools/video-gen/.env
+**/fal-veo/.env

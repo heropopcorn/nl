@@ -34,6 +34,11 @@
 | `share/` | ChatGPT 分享页相关材料 |
 | `notes/` | 问题与备注 |
 
+## 图生视频（fal Veo）
+
+脚本与说明：[`tools/video-gen/`](tools/video-gen/) · [`docs/video-generation-fal-veo.md`](docs/video-generation-fal-veo.md)  
+模型：`fal-ai/veo3.1/lite/image-to-video`（需自备 `FAL_KEY`，勿提交密钥）。
+
 ## 导演台设计（下一阶段实现依据）
 
 Codex 设计稿：`codex/director-desk-design/`（与 `video_game/docs/director-desk/` 同步）。
