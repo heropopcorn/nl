@@ -1,3 +1,4 @@
+class_name VillagePlayer
 extends CharacterBody2D
 
 const WALK_SPEED := 210.0

@@ -12,7 +12,7 @@ const MODE_HELP := {
 	Mode.PATH: "Path: LMB add point, Backspace undo, P play, WASD cancels playback.",
 }
 
-var village: Node2D
+var village: VillageSandbox
 var mode: Mode = Mode.PLAY
 var water_tool: WaterTool = WaterTool.BRUSH
 var erase := false
@@ -35,7 +35,7 @@ var _poly_line: Line2D
 var _brush_cursor: Node2D
 
 
-func setup(host: Node2D) -> void:
+func setup(host: VillageSandbox) -> void:
 	village = host
 	_build_overlays()
 	_build_picker()
@@ -447,10 +447,10 @@ func _paint_at_mouse() -> void:
 
 
 func _add_poly_point() -> void:
-	var mouse := village.get_global_mouse_position()
+	var mouse: Vector2 = village.get_global_mouse_position()
 	var uv: Vector2 = village.world_to_uv(mouse)
 	if _poly_uv.size() >= 3:
-		var first := village.uv_to_world(_poly_uv[0])
+		var first: Vector2 = village.uv_to_world(_poly_uv[0])
 		if first.distance_to(mouse) <= 18.0:
 			village.fill_water_polygon_uv(PackedVector2Array(_poly_uv), erase)
 			_poly_uv.clear()

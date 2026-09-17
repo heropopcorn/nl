@@ -1,3 +1,4 @@
+class_name VillageSandbox
 extends Node2D
 
 ## First village sandbox: orthographic ground + a few isometric atlas props.
@@ -36,7 +37,7 @@ const PROP_LAYOUT: Array[Dictionary] = [
 @onready var world: Node2D = $World
 @onready var terrain: Sprite2D = $World/Terrain
 @onready var water: Sprite2D = $World/WaterOverlay
-@onready var player: CharacterBody2D = $World/Player
+@onready var player: VillagePlayer = $World/Player
 @onready var camera: Camera2D = $World/Player/Camera2D
 @onready var hint: Label = $HUD/ControlsHint
 @onready var hud: CanvasLayer = $HUD
@@ -69,7 +70,8 @@ func _ready() -> void:
 	_setup_editor()
 	var args := OS.get_cmdline_user_args()
 	var selftest := "--selftest" in args
-	if not selftest:
+	var take_shot := "--screenshot" in args
+	if not selftest and not take_shot:
 		load_user_overrides()
 	print("Village ready — props spawned, water mask on, player at plaza.")
 	if selftest:
@@ -77,8 +79,8 @@ func _ready() -> void:
 		var code := await _run_selftest()
 		get_tree().quit(code)
 		return
-	if "--screenshot" in args:
-		await get_tree().create_timer(0.6).timeout
+	if take_shot:
+		await _await_render()
 		_save_screenshot()
 		get_tree().quit()
 
@@ -360,7 +362,7 @@ func _setup_editor() -> void:
 	editor = script.new()
 	editor.name = "RuntimeEditor"
 	hud.add_child(editor)
-	editor.setup(self)
+	editor.call("setup", self)
 
 
 func _bind_terrain() -> void:
@@ -438,7 +440,7 @@ func _place_player() -> void:
 func _limit_camera() -> void:
 	var size := terrain_size()
 	var extra_right := 0.0
-	if _atlas_sheet and _atlas_sheet.texture:
+	if not using_custom_ground and _atlas_sheet and _atlas_sheet.texture:
 		extra_right = _atlas_sheet.texture.get_width() + 120.0
 	camera.limit_left = int(-size.x * 0.5)
 	camera.limit_top = int(-size.y * 0.5)
@@ -453,6 +455,9 @@ func _on_ground_size_changed(old_size: Vector2) -> void:
 	_reposition_atlas()
 	rebuild_map_bounds()
 	_limit_camera()
+	camera.offset = Vector2.ZERO
+	if _atlas_sheet:
+		_atlas_sheet.visible = not using_custom_ground
 	if water_image == null or water_image.get_width() != int(new_size.x) or water_image.get_height() != int(new_size.y):
 		if old_size == Vector2.ZERO or using_custom_ground:
 			_blank_water_image(new_size)
@@ -516,6 +521,14 @@ func _save_screenshot(filename: String = "village_preview.png") -> String:
 	return abs_path
 
 
+func _await_render() -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	RenderingServer.force_draw(true)
+	await get_tree().process_frame
+	await get_tree().create_timer(0.15).timeout
+
+
 func _load_png(path: String) -> Image:
 	if path.is_empty():
 		return null
@@ -566,6 +579,9 @@ func _run_selftest() -> int:
 		errors.append("expected water collision polygons")
 	if not FileAccess.file_exists(SceneLayout.USER_WATER):
 		errors.append("missing user://water_mask.png")
+	if DisplayServer.get_name() != "headless":
+		await _await_render()
+		_save_screenshot("village_custom_ground_water.png")
 
 	if editor and editor.has_method("set_path_uv"):
 		editor.set_path_uv([Vector2(0.18, 0.80), Vector2(0.82, 0.80)])
@@ -580,6 +596,9 @@ func _run_selftest() -> int:
 			errors.append("path playback did not move the player")
 		if player.collision_mask != 0:
 			errors.append("path playback should ignore collision")
+		if DisplayServer.get_name() != "headless":
+			await _await_render()
+			_save_screenshot("village_path_playing.png")
 		player.stop_path()
 		if player.is_playing_path():
 			errors.append("path should stop")
@@ -591,9 +610,9 @@ func _run_selftest() -> int:
 		errors.append("reset_ground should restore approved terrain")
 	if hide_baked_props:
 		errors.append("reset_ground should show baked props")
-
 	if DisplayServer.get_name() != "headless":
-		_save_screenshot("village_selftest.png")
+		await _await_render()
+		_save_screenshot("village_reset_approved.png")
 
 	if errors.is_empty():
 		print("SELFTEST PASS")
