@@ -31,3 +31,5 @@ tools/audio-gen/.env
 !tools/audio-gen/.env.example
 
 video_game/export/
+
+tools/audio-gen/output/
