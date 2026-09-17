@@ -34,6 +34,11 @@
 | `share/` | ChatGPT 分享页相关材料 |
 | `notes/` | 问题与备注 |
 
+## 导演台设计（下一阶段实现依据）
+
+Codex 设计稿：`codex/director-desk-design/`（与 `video_game/docs/director-desk/` 同步）。
+Cursor 按该文档把运行时编辑器升级为多场景导演台（框选水域+流向、角色路线、天气等）。
+
 ## 当前资产入口（生产 sheet 优先看这里）
 
 - 说明：`codex/asset-gen/README.md`

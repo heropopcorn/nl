@@ -1,0 +1,102 @@
+{
+  "schema_version": 2,
+  "scene_id": "scn_7f3a2c91",
+  "name": "雨中的村口",
+  "created_at": "2026-09-17T12:00:00Z",
+  "updated_at": "2026-09-17T12:34:56Z",
+  "background": {
+    "source": "uploaded",
+    "preset_id": null,
+    "file": "background.png",
+    "original_file_name": "village-rainy.webp",
+    "pixel_size": [
+      1600,
+      900
+    ],
+    "sha256": "b3b7b1ed6d6a0edbb17236f3d67b95f1aa2b98f7bb155f99cc4d750a8f8f9db1"
+  },
+  "coordinate_space": {
+    "origin": "top_left",
+    "unit": "normalized_uv",
+    "x_axis": "right",
+    "y_axis": "down"
+  },
+  "editor": {
+    "show_baked_props": false,
+    "water_collision_enabled": true,
+    "snap_enabled": false,
+    "snap_grid_px": 8
+  },
+  "water_regions": [
+    {
+      "id": "water_main_01",
+      "name": "主河道上段",
+      "enabled": true,
+      "rect_uv": [
+        0.12,
+        0.18,
+        0.24,
+        0.16
+      ],
+      "flow_dir": [
+        0.316228,
+        0.948683
+      ],
+      "flow_speed": 0.22,
+      "collision_enabled": true
+    },
+    {
+      "id": "water_main_02",
+      "name": "主河道下段",
+      "enabled": true,
+      "rect_uv": [
+        0.36,
+        0.34,
+        0.18,
+        0.27
+      ],
+      "flow_dir": [
+        0.894427,
+        0.447214
+      ],
+      "flow_speed": 0.3,
+      "collision_enabled": false
+    }
+  ],
+  "actors": [
+    {
+      "id": "actor_lead_01",
+      "character_id": "farmer_placeholder",
+      "display_name": "主角",
+      "enabled": true,
+      "start_uv": [
+        0.42,
+        0.42
+      ],
+      "route": {
+        "points_uv": [
+          [
+            0.42,
+            0.42
+          ],
+          [
+            0.5,
+            0.48
+          ],
+          [
+            0.62,
+            0.7
+          ]
+        ],
+        "speed_px_per_sec": 210.0,
+        "loop": false,
+        "collision_mode": "ignore"
+      }
+    }
+  ],
+  "weather": {
+    "enabled": true,
+    "type": "rain",
+    "intensity": 0.6
+  }
+}
