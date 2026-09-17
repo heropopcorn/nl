@@ -1,5 +1,5 @@
 {
-  "$comment": "Example only — not loaded by the game yet. Runtime overrides belong in user://, not art/approved/.",
+  "$comment": "Mirrors user://scene_layout.json written by the runtime editor. Files live in user://, never art/approved/.",
   "version": 1,
   "ground": "user://custom_ground.png",
   "water_mask": "user://water_mask.png",
