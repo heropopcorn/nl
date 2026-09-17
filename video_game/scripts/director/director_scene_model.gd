@@ -71,6 +71,7 @@ var extras: Dictionary = {}
 var errors: PackedStringArray = PackedStringArray()
 var warnings: PackedStringArray = PackedStringArray()
 var parse_failed: bool = false
+var _sticky_parse_errors: PackedStringArray = PackedStringArray()
 
 
 static func example_path() -> String:
@@ -145,12 +146,12 @@ static func from_json_text(text: String) -> DirectorSceneModel:
 		model.parse_failed = true
 		model._err("场景文件过大（超过 1 MiB）")
 		return model
-	var parsed: Variant = JSON.parse_string(text)
-	if typeof(parsed) != TYPE_DICTIONARY:
+	var json := JSON.new()
+	if json.parse(text) != OK or typeof(json.data) != TYPE_DICTIONARY:
 		model.parse_failed = true
 		model._err("无法解析场景文件")
 		return model
-	model.apply_dict(parsed as Dictionary)
+	model.apply_dict(json.data as Dictionary)
 	return model
 
 
@@ -163,6 +164,7 @@ static func from_dict(data: Dictionary) -> DirectorSceneModel:
 func apply_dict(data: Dictionary) -> void:
 	errors = PackedStringArray()
 	warnings = PackedStringArray()
+	_sticky_parse_errors = PackedStringArray()
 	parse_failed = false
 	extras = _take_extras(data, KNOWN_SCENE_KEYS)
 	schema_version = _as_int(data.get("schema_version", 0), 0)
@@ -178,15 +180,15 @@ func apply_dict(data: Dictionary) -> void:
 	if raw_water is Array:
 		var waters: Array = raw_water
 		if waters.size() > WATER_MAX:
-			_err("水域数量超过 64")
+			_parse_err("水域数量超过 64")
 		var limit := mini(waters.size(), WATER_MAX)
 		for i in range(limit):
 			if waters[i] is Dictionary:
 				water_regions.append(_parse_water(waters[i]))
 			else:
-				_err("水域条目格式无效")
+				_parse_err("水域条目格式无效")
 	else:
-		_err("water_regions 必须是数组")
+		_parse_err("water_regions 必须是数组")
 	actors.clear()
 	var raw_actors: Variant = data.get("actors", [])
 	if raw_actors is Array:
@@ -198,9 +200,9 @@ func apply_dict(data: Dictionary) -> void:
 			if actor_list[i] is Dictionary:
 				actors.append(_parse_actor(actor_list[i]))
 			else:
-				_err("角色条目格式无效")
+				_parse_err("角色条目格式无效")
 	else:
-		_err("actors 必须是数组")
+		_parse_err("actors 必须是数组")
 	weather = _parse_weather(data.get("weather", {}))
 	if data.has("camera"):
 		camera = data["camera"]
@@ -328,6 +330,12 @@ static func color_to_arr(color: Color) -> Array:
 
 func validate() -> void:
 	_ensure_regex()
+	errors = PackedStringArray()
+	warnings = PackedStringArray()
+	for item in _sticky_parse_errors:
+		_err(item)
+	if parse_failed:
+		return
 	if schema_version != SCHEMA_VERSION:
 		_err("schema_version 必须为 2")
 	if _scene_id_re.search(scene_id) == null:
@@ -455,7 +463,7 @@ func _validate_weather() -> void:
 
 func _parse_background(value: Variant) -> Dictionary:
 	if typeof(value) != TYPE_DICTIONARY:
-		_err("background 必须是对象")
+		_parse_err("background 必须是对象")
 		return {
 			"source": "preset",
 			"preset_id": PRESET_VILLAGE,
@@ -484,7 +492,7 @@ func _parse_background(value: Variant) -> Dictionary:
 
 func _parse_coordinate_space(value: Variant) -> Dictionary:
 	if typeof(value) != TYPE_DICTIONARY:
-		_err("coordinate_space 必须是对象")
+		_parse_err("coordinate_space 必须是对象")
 		return default_coordinate_space()
 	var data: Dictionary = value
 	var out := _take_extras(data, KNOWN_COORD_KEYS)
@@ -497,7 +505,7 @@ func _parse_coordinate_space(value: Variant) -> Dictionary:
 
 func _parse_editor(value: Variant) -> Dictionary:
 	if typeof(value) != TYPE_DICTIONARY:
-		_err("editor 必须是对象")
+		_parse_err("editor 必须是对象")
 		return default_editor(true)
 	var data: Dictionary = value
 	var out := _take_extras(data, KNOWN_EDITOR_KEYS)
@@ -560,7 +568,7 @@ func _parse_actor(data: Dictionary) -> Dictionary:
 
 func _parse_weather(value: Variant) -> Dictionary:
 	if typeof(value) != TYPE_DICTIONARY:
-		_err("weather 必须是对象")
+		_parse_err("weather 必须是对象")
 		return default_weather()
 	var data: Dictionary = value
 	var out := _take_extras(data, KNOWN_WEATHER_KEYS)
@@ -619,6 +627,12 @@ func _export_actor(actor: Dictionary) -> Dictionary:
 		"start_uv": actor.get("start_uv", vec2_to_arr(DEFAULT_START_UV)),
 		"route": route_out,
 	})
+
+
+func _parse_err(message: String) -> void:
+	if message not in _sticky_parse_errors:
+		_sticky_parse_errors.append(message)
+	_err(message)
 
 
 func _err(message: String) -> void:

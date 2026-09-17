@@ -1,14 +1,18 @@
 class_name VillagePlayer
 extends CharacterBody2D
 
+signal path_ended(reason: String)
+
 const WALK_SPEED := 210.0
 const SPRINT_SPEED := 320.0
 
 @onready var sprite: Sprite2D = $Sprite2D
 
 var control_enabled := true
+var path_speed := WALK_SPEED
 var _base_offset := Vector2.ZERO
 var _path_playing := false
+var _path_paused := false
 var _path_loop := false
 var _path_world: PackedVector2Array = PackedVector2Array()
 var _path_seg := 0
@@ -26,14 +30,16 @@ func is_playing_path() -> bool:
 	return _path_playing
 
 
-func play_path(points: PackedVector2Array, loop: bool, ignore_collision: bool) -> bool:
+func play_path(points: PackedVector2Array, loop: bool, ignore_collision: bool, speed: float = WALK_SPEED) -> bool:
 	if points.size() < 2:
 		return false
-	stop_path()
+	stop_path("replace")
 	_path_world = points.duplicate()
 	_path_loop = loop
 	_path_seg = 0
 	_path_playing = true
+	_path_paused = false
+	path_speed = clampf(speed, 20.0, 600.0)
 	_saved_collision_mask = collision_mask
 	if ignore_collision:
 		collision_mask = 0
@@ -42,13 +48,32 @@ func play_path(points: PackedVector2Array, loop: bool, ignore_collision: bool) -
 	return true
 
 
-func stop_path() -> void:
+func pause_path() -> void:
+	if not _path_playing:
+		return
+	_path_paused = true
+	velocity = Vector2.ZERO
+
+
+func resume_path() -> void:
+	if _path_playing:
+		_path_paused = false
+
+
+func is_path_paused() -> bool:
+	return _path_playing and _path_paused
+
+
+func stop_path(reason: String = "stop") -> void:
 	if not _path_playing:
 		return
 	_path_playing = false
+	_path_paused = false
 	collision_mask = _saved_collision_mask
 	velocity = Vector2.ZERO
 	_rest_sprite()
+	if reason != "replace":
+		path_ended.emit(reason)
 
 
 func _physics_process(delta: float) -> void:
@@ -56,10 +81,18 @@ func _physics_process(delta: float) -> void:
 		if control_enabled:
 			var cancel := Input.get_vector("move_left", "move_right", "move_up", "move_down")
 			if cancel.length() > 0.15:
-				stop_path()
+				stop_path("cancel")
+			elif _path_paused:
+				velocity = Vector2.ZERO
+				move_and_slide()
+				return
 			else:
 				_follow_path(delta)
 				return
+		elif _path_paused:
+			velocity = Vector2.ZERO
+			move_and_slide()
+			return
 		else:
 			_follow_path(delta)
 			return
@@ -81,12 +114,12 @@ func _follow_path(delta: float) -> void:
 			_path_seg = 0
 			global_position = _path_world[0]
 		else:
-			stop_path()
+			stop_path("end")
 			return
 	var target: Vector2 = _path_world[_path_seg + 1]
 	var to_target := target - global_position
 	var distance := to_target.length()
-	var step := WALK_SPEED * delta
+	var step := path_speed * delta
 	var direction := to_target / distance if distance > 0.001 else Vector2.ZERO
 	if distance <= step:
 		global_position = target
@@ -94,7 +127,7 @@ func _follow_path(delta: float) -> void:
 		_path_seg += 1
 		_animate_walk(direction)
 		return
-	velocity = direction * WALK_SPEED
+	velocity = direction * path_speed
 	move_and_slide()
 	_animate_walk(direction)
 

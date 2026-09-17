@@ -5,9 +5,14 @@ render_mode blend_mix, unshaded;
 uniform float flow_speed : hint_range(0.0, 1.5) = 0.22;
 uniform vec4 tint : source_color = vec4(0.42, 0.76, 0.92, 0.48);
 uniform vec2 flow_dir = vec2(0.18, 0.92);
+uniform float director_time = -1.0;
 
 void fragment() {
-	float t = TIME * flow_speed;
+	float clock = TIME;
+	if (director_time >= 0.0) {
+		clock = director_time;
+	}
+	float t = clock * flow_speed;
 	float a = texture(TEXTURE, UV).a;
 	vec2 n = UV * vec2(22.0, 36.0) + flow_dir * t * 2.4;
 	float wave = sin(n.y + t * 7.0) * cos(n.x * 0.65 - t * 4.2);

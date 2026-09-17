@@ -1,4 +1,12 @@
-# Runtime editor MVP — controls
+# Runtime editor MVP — superseded by 导演台
+
+The in-engine **Runtime editor** (brush water / path) is replaced as the default UI by **导演台 P0**. See [`director-desk/usage.md`](director-desk/usage.md) and [`director-desk/director-desk-design.md`](director-desk/director-desk-design.md).
+
+v1 files (`user://scene_layout.json`, `custom_ground.png`, `water_mask.png`) are **migrated once** into `user://director_desk/` and are not deleted. Approved art under `art/approved/` is never overwritten.
+
+The rest of this page is the old MVP control table, kept for history.
+
+## Modes (legacy MVP)
 
 In-engine HUD for the three MVP features in `docs/custom-editor-feasibility.md`. Same UI on desktop F5 and the Web export. Overrides go to **`user://`** only (`scene_layout.json`, `custom_ground.png`, `water_mask.png`). Approved art under `art/approved/` is never overwritten.
 

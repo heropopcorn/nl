@@ -39,6 +39,5 @@ theme_override_colors/font_color = Color(0.98, 0.95, 0.86, 1)
 theme_override_colors/font_outline_color = Color(0.2, 0.14, 0.08, 1)
 theme_override_constants/outline_size = 6
 theme_override_font_sizes/font_size = 18
-text = "WASD walk (default)  Shift sprint  P play/stop path
-1 Play  2 Water  3 Path  B load PNG  Right-drag pan
-F1 hide this  F3 collision  Editor panel is on the right"
+text = "导演台：左栏场景  右栏水域/角色/天气  底栏播放
+WASD 走位  Space 播放/暂停  右键拖镜头  F1 帮助  F3 碰撞"

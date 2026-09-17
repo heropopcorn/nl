@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Headless MVP check: custom ground, water mask, path playback.
+# Headless director-desk + village check.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GODOT="${GODOT_BIN:-}"
