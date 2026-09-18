@@ -4,20 +4,29 @@ extends Node2D
 ## Renders movable library elements and clipped background regions. Every item
 ## uses integer z_index; World's Y-sort resolves feet order inside equal layers.
 
+const CATEGORY_LABELS := {"houses": "房屋", "trees": "树木", "props": "道具"}
 const ASSETS := [
-	"house_blue_cottage", "house_market", "house_round_green", "house_watermill",
-	"tree_oak", "tree_cherry", "tree_pine", "windmill", "well", "bridge_stone",
-	"signboard", "lamppost", "garden_plot", "coop", "cart", "crates_still_life",
-	"flowers_white_a", "flowers_white_b", "flowers_blue", "flowers_pink",
+	{"id": "house_blue_cottage", "label": "蓝顶小屋", "category": "houses", "default_layer": 0, "default_scale": 0.5},
+	{"id": "house_market", "label": "集市房屋", "category": "houses", "default_layer": 0, "default_scale": 0.5},
+	{"id": "house_round_green", "label": "圆顶小屋", "category": "houses", "default_layer": 0, "default_scale": 0.5},
+	{"id": "house_watermill", "label": "水磨坊", "category": "houses", "default_layer": 0, "default_scale": 0.5},
+	{"id": "windmill", "label": "风车", "category": "houses", "default_layer": 0, "default_scale": 0.5},
+	{"id": "coop", "label": "鸡舍", "category": "houses", "default_layer": 0, "default_scale": 0.5},
+	{"id": "tree_oak", "label": "橡树", "category": "trees", "default_layer": 0, "default_scale": 0.5},
+	{"id": "tree_cherry", "label": "樱花树", "category": "trees", "default_layer": 0, "default_scale": 0.5},
+	{"id": "tree_pine", "label": "松树", "category": "trees", "default_layer": 0, "default_scale": 0.5},
+	{"id": "well", "label": "水井", "category": "props", "default_layer": 1, "default_scale": 0.5},
+	{"id": "bridge_stone", "label": "石桥", "category": "props", "default_layer": 1, "default_scale": 0.5},
+	{"id": "signboard", "label": "路牌", "category": "props", "default_layer": 1, "default_scale": 0.5},
+	{"id": "lamppost", "label": "路灯", "category": "props", "default_layer": 1, "default_scale": 0.5},
+	{"id": "garden_plot", "label": "菜地", "category": "props", "default_layer": -1, "default_scale": 0.5},
+	{"id": "cart", "label": "手推车", "category": "props", "default_layer": 1, "default_scale": 0.5},
+	{"id": "crates_still_life", "label": "木箱", "category": "props", "default_layer": 1, "default_scale": 0.5},
+	{"id": "flowers_white_a", "label": "白花甲", "category": "props", "default_layer": -1, "default_scale": 0.5},
+	{"id": "flowers_white_b", "label": "白花乙", "category": "props", "default_layer": -1, "default_scale": 0.5},
+	{"id": "flowers_blue", "label": "蓝花", "category": "props", "default_layer": -1, "default_scale": 0.5},
+	{"id": "flowers_pink", "label": "粉花", "category": "props", "default_layer": -1, "default_scale": 0.5},
 ]
-const LABELS := {
-	"house_blue_cottage": "蓝顶小屋", "house_market": "集市房屋", "house_round_green": "圆顶小屋",
-	"house_watermill": "水磨坊", "tree_oak": "橡树", "tree_cherry": "樱花树", "tree_pine": "松树",
-	"windmill": "风车", "well": "水井", "bridge_stone": "石桥", "signboard": "路牌",
-	"lamppost": "路灯", "garden_plot": "菜地", "coop": "鸡舍", "cart": "手推车",
-	"crates_still_life": "木箱", "flowers_white_a": "白花 A", "flowers_white_b": "白花 B",
-	"flowers_blue": "蓝花", "flowers_pink": "粉花",
-}
 
 var village: VillageSandbox
 var _element_nodes: Dictionary = {}
@@ -31,11 +40,26 @@ func setup(host: VillageSandbox) -> void:
 
 
 static func asset_label(asset_id: String) -> String:
-	return str(LABELS.get(asset_id, asset_id))
+	return str(asset_info(asset_id).get("label", asset_id))
+
+
+static func asset_info(asset_id: String) -> Dictionary:
+	for asset in ASSETS:
+		if str(asset.get("id", "")) == asset_id:
+			return asset
+	return {}
+
+
+static func assets_in_category(category: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	for asset in ASSETS:
+		if str(asset.get("category", "")) == category:
+			result.append(asset)
+	return result
 
 
 static func asset_exists(asset_id: String) -> bool:
-	return asset_id in ASSETS and ResourceLoader.exists("res://art/sliced/%s.png" % asset_id)
+	return not asset_info(asset_id).is_empty() and ResourceLoader.exists("res://art/sliced/%s.png" % asset_id)
 
 
 func rebuild(model: DirectorSceneModel) -> void:
