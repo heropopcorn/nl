@@ -10,6 +10,8 @@ const NAME_MIN := 1
 const NAME_MAX := 40
 const WATER_MAX := 64
 const ACTORS_MAX_PARSE := 32
+const ELEMENTS_MAX := 256
+const REGIONS_MAX := 64
 const ROUTE_POINTS_MAX := 256
 const WATER_MIN_PX := 8.0
 const FLOW_SPEED_MAX := 1.5
@@ -31,7 +33,7 @@ const COORD_Y := "down"
 const KNOWN_SCENE_KEYS := [
 	"schema_version", "scene_id", "name", "created_at", "updated_at",
 	"background", "coordinate_space", "editor", "water_regions", "actors",
-	"weather", "camera", "legacy_water",
+	"elements", "background_regions", "weather", "camera", "legacy_water",
 ]
 const KNOWN_BG_KEYS := [
 	"source", "preset_id", "file", "original_file_name", "pixel_size",
@@ -42,12 +44,14 @@ const KNOWN_EDITOR_KEYS := [
 	"show_baked_props", "water_collision_enabled", "snap_enabled", "snap_grid_px",
 ]
 const KNOWN_WATER_KEYS := [
-	"id", "name", "enabled", "rect_uv", "flow_dir", "flow_speed", "collision_enabled",
+	"id", "name", "enabled", "shape", "rect_uv", "points_uv", "flow_dir", "flow_speed", "collision_enabled",
 ]
 const KNOWN_ACTOR_KEYS := [
-	"id", "character_id", "display_name", "enabled", "start_uv", "route",
+	"id", "character_id", "display_name", "enabled", "start_uv", "layer", "route",
 ]
-const KNOWN_ROUTE_KEYS := ["points_uv", "speed_px_per_sec", "loop", "collision_mode"]
+const KNOWN_ROUTE_KEYS := ["points_uv", "speed_px_per_sec", "loop", "collision_mode", "visible"]
+const KNOWN_ELEMENT_KEYS := ["id", "asset_id", "display_name", "enabled", "position_uv", "layer", "scale"]
+const KNOWN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "layer"]
 const KNOWN_WEATHER_KEYS := ["enabled", "type", "intensity"]
 
 static var _scene_id_re: RegEx
@@ -64,6 +68,8 @@ var coordinate_space: Dictionary = {}
 var editor: Dictionary = {}
 var water_regions: Array[Dictionary] = []
 var actors: Array[Dictionary] = []
+var elements: Array[Dictionary] = []
+var background_regions: Array[Dictionary] = []
 var weather: Dictionary = {}
 var camera: Variant = null
 var legacy_water: Variant = null
@@ -203,6 +209,22 @@ func apply_dict(data: Dictionary) -> void:
 				_parse_err("角色条目格式无效")
 	else:
 		_parse_err("actors 必须是数组")
+	elements.clear()
+	var raw_elements: Variant = data.get("elements", [])
+	if raw_elements is Array:
+		for i in range(mini((raw_elements as Array).size(), ELEMENTS_MAX)):
+			if raw_elements[i] is Dictionary:
+				elements.append(_parse_element(raw_elements[i]))
+	else:
+		_parse_err("elements 必须是数组")
+	background_regions.clear()
+	var raw_regions: Variant = data.get("background_regions", [])
+	if raw_regions is Array:
+		for i in range(mini((raw_regions as Array).size(), REGIONS_MAX)):
+			if raw_regions[i] is Dictionary:
+				background_regions.append(_parse_background_region(raw_regions[i]))
+	else:
+		_parse_err("background_regions 必须是数组")
 	weather = _parse_weather(data.get("weather", {}))
 	if data.has("camera"):
 		camera = data["camera"]
@@ -247,6 +269,14 @@ func to_dict() -> Dictionary:
 	for actor in actors:
 		actor_out.append(_export_actor(actor))
 	out["actors"] = actor_out
+	var element_out: Array = []
+	for element in elements:
+		element_out.append(_export_element(element))
+	out["elements"] = element_out
+	var region_out: Array = []
+	for region in background_regions:
+		region_out.append(_export_background_region(region))
+	out["background_regions"] = region_out
 	out["weather"] = _export_with_extras(weather, KNOWN_WEATHER_KEYS, {
 		"enabled": bool(weather.get("enabled", false)),
 		"type": str(weather.get("type", "rain")),
@@ -286,10 +316,8 @@ func has_water_overlap() -> bool:
 func overlapping_pairs() -> Array:
 	var pairs: Array = []
 	for i in range(water_regions.size()):
-		var a := rect_from_region(water_regions[i])
 		for j in range(i + 1, water_regions.size()):
-			var b := rect_from_region(water_regions[j])
-			if rects_overlap_area(a, b):
+			if polygons_overlap(water_polygon(water_regions[i]), water_polygon(water_regions[j])):
 				pairs.append([str(water_regions[i].get("id", "")), str(water_regions[j].get("id", ""))])
 	return pairs
 
@@ -299,6 +327,54 @@ static func rect_from_region(region: Dictionary) -> Rect2:
 	if arr.size() < 4:
 		return Rect2()
 	return Rect2(arr[0], arr[1], arr[2], arr[3])
+
+
+static func water_polygon(region: Dictionary) -> PackedVector2Array:
+	if str(region.get("shape", "rect")) == "polygon":
+		return points_from_value(region.get("points_uv", []))
+	var rect := rect_from_region(region)
+	return PackedVector2Array([rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)])
+
+
+static func points_from_value(value: Variant) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	if value is Array:
+		for item in value:
+			out.append(_vec2(item, Vector2.ZERO))
+	return out
+
+
+static func polygon_bounds(points: PackedVector2Array) -> Rect2:
+	if points.is_empty():
+		return Rect2()
+	var minp := points[0]
+	var maxp := points[0]
+	for point in points:
+		minp = minp.min(point)
+		maxp = maxp.max(point)
+	return Rect2(minp, maxp - minp)
+
+
+static func polygon_area(points: PackedVector2Array) -> float:
+	if points.size() < 3:
+		return 0.0
+	var total := 0.0
+	for i in range(points.size()):
+		var a := points[i]
+		var b := points[(i + 1) % points.size()]
+		total += a.x * b.y - b.x * a.y
+	return absf(total) * 0.5
+
+
+static func polygons_overlap(a: PackedVector2Array, b: PackedVector2Array) -> bool:
+	if a.size() < 3 or b.size() < 3:
+		return false
+	if not rects_overlap_area(polygon_bounds(a), polygon_bounds(b)):
+		return false
+	for poly in Geometry2D.intersect_polygons(a, b):
+		if polygon_area(poly) > OVERLAP_EPS:
+			return true
+	return false
 
 
 static func rects_overlap_area(a: Rect2, b: Rect2) -> bool:
@@ -349,6 +425,8 @@ func validate() -> void:
 	_validate_background()
 	_validate_waters()
 	_validate_actors()
+	_validate_elements()
+	_validate_background_regions()
 	_validate_weather()
 
 
@@ -400,15 +478,17 @@ func _validate_waters() -> void:
 			seen[rid] = true
 		if not rid.is_empty() and not rid.begins_with("water_"):
 			_warn("水域 ID 应使用 water_ 前缀")
-		var rect := rect_from_region(region)
-		if rect.size.x <= UV_EPS or rect.size.y <= UV_EPS:
-			_err("水域矩形无效")
-		if rect.position.x < -UV_EPS or rect.position.y < -UV_EPS \
-				or rect.end.x > 1.0 + UV_EPS or rect.end.y > 1.0 + UV_EPS:
-			_err("UV 坐标必须在 0 到 1 之间")
-		if rect.size.x * float(px.x) + 0.001 < WATER_MIN_PX \
-				or rect.size.y * float(px.y) + 0.001 < WATER_MIN_PX:
-			_err("水域矩形过小（至少 8×8 像素）")
+		var poly := water_polygon(region)
+		var bounds := polygon_bounds(poly)
+		if poly.size() < 3 or polygon_area(poly) <= UV_EPS:
+			_err("水域区域无效")
+		for point in poly:
+			if point.x < -UV_EPS or point.y < -UV_EPS or point.x > 1.0 + UV_EPS or point.y > 1.0 + UV_EPS:
+				_err("UV 坐标必须在 0 到 1 之间")
+				break
+		if bounds.size.x * float(px.x) + 0.001 < WATER_MIN_PX \
+				or bounds.size.y * float(px.y) + 0.001 < WATER_MIN_PX:
+			_err("水域区域过小（至少 8×8 像素）")
 		var speed := float(region.get("flow_speed", 0.22))
 		if speed < 0.0 or speed > FLOW_SPEED_MAX:
 			_err("流速须在 0 到 1.5 之间")
@@ -448,8 +528,39 @@ func _validate_actors() -> void:
 				if p.x < -UV_EPS or p.y < -UV_EPS or p.x > 1.0 + UV_EPS or p.y > 1.0 + UV_EPS:
 					_err("UV 坐标必须在 0 到 1 之间")
 					break
-	if actors.size() > 1:
-		_warn("P0 每个场景建议 1 个角色，额外角色将原样保留")
+
+
+func _validate_elements() -> void:
+	var seen := {}
+	for element in elements:
+		var eid := str(element.get("id", ""))
+		if eid.is_empty() or seen.has(eid):
+			_err("元素 ID 缺失或重复")
+		seen[eid] = true
+		if str(element.get("asset_id", "")).is_empty():
+			_err("元素缺少素材")
+		_validate_uv_point(_vec2(element.get("position_uv", [0.5, 0.5]), Vector2(-1, -1)))
+		if float(element.get("scale", 0.5)) < 0.05 or float(element.get("scale", 0.5)) > 4.0:
+			_err("元素缩放须在 0.05 到 4 之间")
+
+
+func _validate_background_regions() -> void:
+	var seen := {}
+	for region in background_regions:
+		var rid := str(region.get("id", ""))
+		if rid.is_empty() or seen.has(rid):
+			_err("底图区域 ID 缺失或重复")
+		seen[rid] = true
+		var points := points_from_value(region.get("points_uv", []))
+		if points.size() < 3 or polygon_area(points) <= UV_EPS:
+			_err("底图区域至少需要 3 个点")
+		for point in points:
+			_validate_uv_point(point)
+
+
+func _validate_uv_point(point: Vector2) -> void:
+	if point.x < -UV_EPS or point.y < -UV_EPS or point.x > 1.0 + UV_EPS or point.y > 1.0 + UV_EPS:
+		_err("UV 坐标必须在 0 到 1 之间")
 
 
 func _validate_weather() -> void:
@@ -521,6 +632,7 @@ func _parse_water(data: Dictionary) -> Dictionary:
 	out["id"] = str(data.get("id", "")).strip_edges()
 	out["name"] = str(data.get("name", ""))
 	out["enabled"] = bool(data.get("enabled", true))
+	out["shape"] = str(data.get("shape", "polygon" if data.has("points_uv") else "rect"))
 	var rect_arr := _as_number_array(data.get("rect_uv", []))
 	var rect := Rect2()
 	if rect_arr.size() >= 4:
@@ -529,6 +641,11 @@ func _parse_water(data: Dictionary) -> Dictionary:
 	rect.size.x = clampf(rect.size.x, 0.0, 1.0 - rect.position.x)
 	rect.size.y = clampf(rect.size.y, 0.0, 1.0 - rect.position.y)
 	out["rect_uv"] = [snap6(rect.position.x), snap6(rect.position.y), snap6(rect.size.x), snap6(rect.size.y)]
+	var poly_out: Array = []
+	for point in points_from_value(data.get("points_uv", [])):
+		poly_out.append(vec2_to_arr(clamp_uv(point)))
+	if not poly_out.is_empty():
+		out["points_uv"] = poly_out
 	var flow := normalize_flow(_vec2(data.get("flow_dir", [0, 1]), Vector2(0, 1)))
 	out["flow_dir"] = vec2_to_arr(flow)
 	out["flow_speed"] = clampf(float(data.get("flow_speed", 0.22)), 0.0, FLOW_SPEED_MAX)
@@ -543,6 +660,7 @@ func _parse_actor(data: Dictionary) -> Dictionary:
 	out["display_name"] = str(data.get("display_name", ""))
 	out["enabled"] = bool(data.get("enabled", true))
 	out["start_uv"] = vec2_to_arr(clamp_uv(_vec2(data.get("start_uv", DEFAULT_START_UV), DEFAULT_START_UV)))
+	out["layer"] = _as_int(data.get("layer", 0), 0)
 	var route_in: Dictionary = {}
 	if data.get("route", {}) is Dictionary:
 		route_in = data["route"]
@@ -562,7 +680,33 @@ func _parse_actor(data: Dictionary) -> Dictionary:
 	)
 	route["loop"] = bool(route_in.get("loop", false))
 	route["collision_mode"] = str(route_in.get("collision_mode", "ignore"))
+	route["visible"] = bool(route_in.get("visible", true))
 	out["route"] = route
+	return out
+
+
+func _parse_element(data: Dictionary) -> Dictionary:
+	var out := _take_extras(data, KNOWN_ELEMENT_KEYS)
+	out["id"] = str(data.get("id", ""))
+	out["asset_id"] = str(data.get("asset_id", "tree_oak"))
+	out["display_name"] = str(data.get("display_name", "元素"))
+	out["enabled"] = bool(data.get("enabled", true))
+	out["position_uv"] = vec2_to_arr(clamp_uv(_vec2(data.get("position_uv", [0.5, 0.5]), Vector2(0.5, 0.5))))
+	out["layer"] = _as_int(data.get("layer", 0), 0)
+	out["scale"] = clampf(float(data.get("scale", 0.5)), 0.05, 4.0)
+	return out
+
+
+func _parse_background_region(data: Dictionary) -> Dictionary:
+	var out := _take_extras(data, KNOWN_REGION_KEYS)
+	out["id"] = str(data.get("id", ""))
+	out["name"] = str(data.get("name", "底图区域"))
+	out["enabled"] = bool(data.get("enabled", true))
+	out["layer"] = _as_int(data.get("layer", 0), 0)
+	var points: Array = []
+	for point in points_from_value(data.get("points_uv", [])):
+		points.append(vec2_to_arr(clamp_uv(point)))
+	out["points_uv"] = points
 	return out
 
 
@@ -599,15 +743,19 @@ func _export_background() -> Dictionary:
 
 
 func _export_water(region: Dictionary) -> Dictionary:
-	return _export_with_extras(region, KNOWN_WATER_KEYS, {
+	var known := {
 		"id": str(region.get("id", "")),
 		"name": str(region.get("name", "")),
 		"enabled": bool(region.get("enabled", true)),
+		"shape": str(region.get("shape", "rect")),
 		"rect_uv": region.get("rect_uv", [0, 0, 0.1, 0.1]),
 		"flow_dir": region.get("flow_dir", [0, 1]),
 		"flow_speed": snap6(float(region.get("flow_speed", 0.22))),
 		"collision_enabled": bool(region.get("collision_enabled", true)),
-	})
+	}
+	if region.has("points_uv"):
+		known["points_uv"] = region["points_uv"]
+	return _export_with_extras(region, KNOWN_WATER_KEYS, known)
 
 
 func _export_actor(actor: Dictionary) -> Dictionary:
@@ -617,6 +765,7 @@ func _export_actor(actor: Dictionary) -> Dictionary:
 		"speed_px_per_sec": snap6(float(route_in.get("speed_px_per_sec", ACTOR_SPEED_DEFAULT))),
 		"loop": bool(route_in.get("loop", false)),
 		"collision_mode": str(route_in.get("collision_mode", "ignore")),
+		"visible": bool(route_in.get("visible", true)),
 	}
 	var route_out := _export_with_extras(route_in, KNOWN_ROUTE_KEYS, route_known)
 	return _export_with_extras(actor, KNOWN_ACTOR_KEYS, {
@@ -625,7 +774,25 @@ func _export_actor(actor: Dictionary) -> Dictionary:
 		"display_name": str(actor.get("display_name", "")),
 		"enabled": bool(actor.get("enabled", true)),
 		"start_uv": actor.get("start_uv", vec2_to_arr(DEFAULT_START_UV)),
+		"layer": _as_int(actor.get("layer", 0), 0),
 		"route": route_out,
+	})
+
+
+func _export_element(element: Dictionary) -> Dictionary:
+	return _export_with_extras(element, KNOWN_ELEMENT_KEYS, {
+		"id": str(element.get("id", "")), "asset_id": str(element.get("asset_id", "tree_oak")),
+		"display_name": str(element.get("display_name", "元素")), "enabled": bool(element.get("enabled", true)),
+		"position_uv": element.get("position_uv", [0.5, 0.5]), "layer": _as_int(element.get("layer", 0), 0),
+		"scale": snap6(float(element.get("scale", 0.5))),
+	})
+
+
+func _export_background_region(region: Dictionary) -> Dictionary:
+	return _export_with_extras(region, KNOWN_REGION_KEYS, {
+		"id": str(region.get("id", "")), "name": str(region.get("name", "底图区域")),
+		"enabled": bool(region.get("enabled", true)), "points_uv": region.get("points_uv", []),
+		"layer": _as_int(region.get("layer", 0), 0),
 	})
 
 

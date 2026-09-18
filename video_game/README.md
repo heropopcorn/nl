@@ -19,7 +19,8 @@ The default UI is the Chinese **导演台** (Director Desk). WASD still walks wh
 | WASD / arrows | Walk (stops route preview; does not edit the saved route) |
 | Shift | Sprint, or snap to 8 px while dragging water/points |
 | Space | Play / pause preview |
-| Esc | Cancel box / leave route edit / stop preview |
+| Enter | Close a water/background lasso |
+| Esc | Cancel box/lasso / leave route edit / stop preview |
 | Ctrl/Cmd+S | Save now |
 | Ctrl/Cmd+Z | Undo |
 | Mouse wheel or `+` / `-` | Zoom |
@@ -30,7 +31,7 @@ The default UI is the Chinese **导演台** (Director Desk). WASD still walks wh
 
 How to use: [`docs/director-desk/usage.md`](docs/director-desk/usage.md). Design contract: [`docs/director-desk/director-desk-design.md`](docs/director-desk/director-desk-design.md).
 
-Water is **non-overlapping UV rectangles** with per-region flow. User data lives under `user://director_desk/` (not `art/approved/`).
+Director Desk V2 supports chapter → scene organization, layered placeable props, clipped background regions, rectangle or polygon water, and concurrent multi-actor routes. User data lives under `user://director_desk/` (not `art/approved/`).
 
 ## Scene tree
 
@@ -39,9 +40,11 @@ Village (Node2D)                  scripts/village.gd
 ├── World (Node2D, y-sort)
 │   ├── Terrain                   preset / blank / uploaded
 │   ├── WaterOverlay              legacy v1 mask only
-│   ├── WaterRegions              box water + per-region shader
+│   ├── WaterRegions              rectangle/polygon water + per-region shader
+│   ├── DirectorContent           layered elements + clipped background regions
 │   ├── Props
-│   ├── Player                    actor placeholder
+│   ├── Player                    first actor placeholder
+│   ├── DirectorActor_*           additional actors at runtime
 │   ├── WaterCollision            legacy mask polygons
 │   └── MapBounds
 ├── WeatherCanvas                 screen-space rain
@@ -73,9 +76,9 @@ python3 tools/prepare_art.py
 
 The current atlas includes two-story / turret cottages. Later house assets should be slightly **lower-tier** with fewer two-story buildings. Keep using this sheet until that pack exists.
 
-## Director Desk (P0)
+## Director Desk V2
 
-Multi-scene runtime director: preset / blank / uploaded ground, box water with per-region flow, one actor route, rain, play/pause/stop. Saves under `user://director_desk/`. Usage: [`docs/director-desk/usage.md`](docs/director-desk/usage.md).
+Chapter-based runtime director: preset / blank / uploaded backgrounds, draggable library elements with integer layers and same-layer feet Y-sort, lasso background layers, richer rectangle/polygon water, multiple independently routed actors, rain, and an explicit edit/play switch. Playback covers the current scene. Saves under `user://director_desk/`. Usage: [`docs/director-desk/usage.md`](docs/director-desk/usage.md).
 
 The older brush-water MVP notes: [`docs/custom-editor-mvp.md`](docs/custom-editor-mvp.md).
 
@@ -97,7 +100,7 @@ godot --headless --path . --quit-after 20
 godot --headless --path . -- --selftest
 ```
 
-`--selftest` covers v2 scene CRUD/migration, box-water flow isolation, actor play/pause/stop, rain, undo, and upload resize (exit code `0` on success).
+`--selftest` covers chapter/scene CRUD and ordering, index migration, integer layers, polygon water control points, isolated water flow, concurrent actors with independent speeds, play/pause/stop, rain, undo, and upload resize (exit code `0` on success).
 
 Pass `-- --screenshot` after the project path to dump `user://village_preview.png` (needs a display to be useful).
 

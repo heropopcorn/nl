@@ -1,7 +1,7 @@
 class_name WaterRegionController
 extends Node2D
 
-## Independent water sprites + rectangle collision. One ShaderMaterial per region.
+## Independent rectangle/polygon water surfaces. One ShaderMaterial per region.
 
 const WATER_COLOR := Color(92.0 / 255.0, 168.0 / 255.0, 210.0 / 255.0, 0.72)
 
@@ -67,33 +67,54 @@ func hit_region(world_pos: Vector2, model: DirectorSceneModel) -> String:
 	var i := model.water_regions.size() - 1
 	while i >= 0:
 		var region: Dictionary = model.water_regions[i]
-		var rect := world_rect_of(region)
-		if rect.has_point(world_pos):
+		var poly := world_polygon_of(region)
+		if poly.size() >= 3 and Geometry2D.is_point_in_polygon(world_pos, poly):
 			return str(region.get("id", ""))
 		i -= 1
 	return ""
 
 
 func world_rect_of(region: Dictionary) -> Rect2:
-	var uv := DirectorSceneModel.rect_from_region(region)
+	var uv := DirectorSceneModel.polygon_bounds(DirectorSceneModel.water_polygon(region))
 	var top_left := village.uv_to_world(uv.position)
 	var size := Vector2(uv.size.x * village.terrain_size().x, uv.size.y * village.terrain_size().y)
 	return Rect2(top_left, size)
 
 
+func world_polygon_of(region: Dictionary) -> PackedVector2Array:
+	var result := PackedVector2Array()
+	for point in DirectorSceneModel.water_polygon(region):
+		result.append(village.uv_to_world(point))
+	return result
+
+
 func _spawn(model: DirectorSceneModel, region: Dictionary, global_collision: bool) -> void:
 	if not bool(region.get("enabled", true)):
 		return
+	var polygon := world_polygon_of(region)
 	var rect := world_rect_of(region)
 	if rect.size.x < 1.0 or rect.size.y < 1.0:
 		return
-	var sprite := Sprite2D.new()
-	sprite.name = str(region.get("id", "water"))
-	sprite.texture = _shared_texture
-	sprite.centered = true
-	sprite.position = rect.position + rect.size * 0.5
-	sprite.scale = Vector2(rect.size.x / 64.0, rect.size.y / 64.0)
-	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	var surface: CanvasItem
+	if str(region.get("shape", "rect")) == "polygon":
+		var poly := Polygon2D.new()
+		poly.name = str(region.get("id", "water"))
+		poly.polygon = polygon
+		var uv := PackedVector2Array()
+		for point in polygon:
+			uv.append((point - rect.position) / rect.size * 64.0)
+		poly.uv = uv
+		poly.texture = _shared_texture
+		surface = poly
+	else:
+		var sprite := Sprite2D.new()
+		sprite.name = str(region.get("id", "water"))
+		sprite.texture = _shared_texture
+		sprite.centered = true
+		sprite.position = rect.position + rect.size * 0.5
+		sprite.scale = Vector2(rect.size.x / 64.0, rect.size.y / 64.0)
+		surface = sprite
+	surface.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	var mat := ShaderMaterial.new()
 	mat.shader = _shader
 	var flow := DirectorSceneModel.normalize_flow(
@@ -103,8 +124,8 @@ func _spawn(model: DirectorSceneModel, region: Dictionary, global_collision: boo
 	mat.set_shader_parameter("flow_speed", float(region.get("flow_speed", 0.22)))
 	mat.set_shader_parameter("tint", Color(0.42, 0.76, 0.92, 0.50))
 	mat.set_shader_parameter("director_time", director_time)
-	sprite.material = mat
-	add_child(sprite)
+	surface.material = mat
+	add_child(surface)
 
 	var body: StaticBody2D = null
 	var collide := global_collision and bool(region.get("collision_enabled", true))
@@ -113,16 +134,21 @@ func _spawn(model: DirectorSceneModel, region: Dictionary, global_collision: boo
 		body.name = str(region.get("id", "water")) + "_body"
 		body.collision_layer = 1
 		body.collision_mask = 0
-		body.position = sprite.position
-		var cs := CollisionShape2D.new()
-		var shape := RectangleShape2D.new()
-		shape.size = rect.size
-		cs.shape = shape
-		body.add_child(cs)
+		if str(region.get("shape", "rect")) == "polygon":
+			var cs_poly := CollisionPolygon2D.new()
+			cs_poly.polygon = polygon
+			body.add_child(cs_poly)
+		else:
+			body.position = rect.position + rect.size * 0.5
+			var cs := CollisionShape2D.new()
+			var shape := RectangleShape2D.new()
+			shape.size = rect.size
+			cs.shape = shape
+			body.add_child(cs)
 		add_child(body)
 
 	_items[str(region.get("id", ""))] = {
-		"sprite": sprite,
+		"sprite": surface,
 		"body": body,
 		"material": mat,
 		"region": region,

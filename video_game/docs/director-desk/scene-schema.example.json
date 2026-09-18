@@ -32,6 +32,7 @@
       "id": "water_main_01",
       "name": "主河道上段",
       "enabled": true,
+      "shape": "rect",
       "rect_uv": [
         0.12,
         0.18,
@@ -49,11 +50,12 @@
       "id": "water_main_02",
       "name": "主河道下段",
       "enabled": true,
-      "rect_uv": [
-        0.36,
-        0.34,
-        0.18,
-        0.27
+      "shape": "polygon",
+      "points_uv": [
+        [0.56, 0.34],
+        [0.78, 0.38],
+        [0.73, 0.65],
+        [0.52, 0.58]
       ],
       "flow_dir": [
         0.894427,
@@ -69,6 +71,7 @@
       "character_id": "farmer_placeholder",
       "display_name": "主角",
       "enabled": true,
+      "layer": 0,
       "start_uv": [
         0.42,
         0.42
@@ -90,8 +93,44 @@
         ],
         "speed_px_per_sec": 210.0,
         "loop": false,
-        "collision_mode": "ignore"
+        "collision_mode": "ignore",
+        "visible": true
       }
+    },
+    {
+      "id": "actor_friend_02",
+      "character_id": "farmer_blue_placeholder",
+      "display_name": "同伴",
+      "enabled": true,
+      "layer": 1,
+      "start_uv": [0.3, 0.55],
+      "route": {
+        "points_uv": [[0.45, 0.58], [0.7, 0.72]],
+        "speed_px_per_sec": 145.0,
+        "loop": false,
+        "collision_mode": "ignore",
+        "visible": true
+      }
+    }
+  ],
+  "elements": [
+    {
+      "id": "element_tree_01",
+      "asset_id": "tree_oak",
+      "display_name": "前景橡树",
+      "enabled": true,
+      "position_uv": [0.68, 0.54],
+      "layer": 2,
+      "scale": 0.5
+    }
+  ],
+  "background_regions": [
+    {
+      "id": "region_wall_01",
+      "name": "矮墙前沿",
+      "enabled": true,
+      "points_uv": [[0.18, 0.6], [0.4, 0.58], [0.42, 0.68], [0.2, 0.7]],
+      "layer": 1
     }
   ],
   "weather": {
