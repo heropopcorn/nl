@@ -8,7 +8,7 @@ enum DragKind { NONE, WATER_MOVE, WATER_RESIZE, WATER_DIR, WATER_POINT, ROUTE_PO
 
 const HANDLE := 8.0
 const TOP_H := 48.0
-const BOTTOM_H := 64.0
+const BOTTOM_H := 72.0
 const LEFT_W := 240.0
 const RIGHT_W := 320.0
 const NARROW := 900.0
@@ -66,6 +66,9 @@ var _pending_filename := ""
 var _pending_open_id := ""
 var _new_source := "preset"
 var _asset_choice := "tree_oak"
+var _asset_category := "houses"
+var _asset_drawer_open := true
+var _placing_asset := false
 var _play_had_actor := false
 
 var _save_timer: Timer
@@ -82,6 +85,10 @@ var _transport_label: Label
 var _search_edit: LineEdit
 var _scene_box: VBoxContainer
 var _tabs: Control
+var _asset_drawer: PanelContainer
+var _asset_drawer_button: Button
+var _asset_grid: GridContainer
+var _asset_category_buttons: Dictionary = {}
 var _tab_index := 0
 var _tab_btns: Array[Button] = []
 var _tab_pages: Array[ScrollContainer] = []
@@ -242,6 +249,14 @@ func render_gizmos(canvas: Node2D) -> void:
 
 func run_runtime_selftest() -> PackedStringArray:
 	var errors: PackedStringArray = PackedStringArray()
+	var ui_font := theme.default_font
+	for required_char in ["章", "套", "索", "停", "树", "屋"]:
+		if ui_font == null or not ui_font.has_char(required_char.unicode_at(0)):
+			errors.append("ui font missing glyph: %s" % required_char)
+	for asset in SceneContentController.ASSETS:
+		if str(asset.get("id", "")).is_empty() or str(asset.get("category", "")).is_empty():
+			errors.append("asset metadata missing id/category")
+			break
 	var top_row := _top.get_child(0) as HBoxContainer
 	for control in top_row.get_children():
 		if control is Button and control.visible and control.size.x < 28.0:
@@ -254,6 +269,8 @@ func run_runtime_selftest() -> PackedStringArray:
 	if model == null:
 		errors.append("boot should create 示例村庄")
 		return errors
+	if not can_drop_asset(Vector2.ZERO, {"kind": "director_asset", "asset_id": "tree_oak"}):
+		errors.append("canvas should accept library asset drag")
 	var first_id := model.scene_id
 	var blank := temp.create_blank_scene("空白测试")
 	if blank == null:
@@ -466,9 +483,11 @@ func _build_picker() -> void:
 
 
 func _build_hud() -> void:
-	_canvas_catch = ColorRect.new()
+	var canvas_script := load("res://scripts/director/director_canvas_drop_target.gd") as Script
+	_canvas_catch = canvas_script.new()
+	_canvas_catch.desk = self
 	_canvas_catch.color = Color(0, 0, 0, 0)
-	_canvas_catch.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_canvas_catch.mouse_filter = Control.MOUSE_FILTER_PASS
 	_canvas_catch.gui_input.connect(_on_canvas_gui_input)
 	_canvas_catch.z_index = 0
 	add_child(_canvas_catch)
@@ -516,7 +535,7 @@ func _fill_top() -> void:
 	_scene_name_label = _label("未选择场景", 15, false)
 	_scene_name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(_scene_name_label)
-	_mode_label = _label("● 编辑模式", 14, true)
+	_mode_label = _label("编辑模式", 14, true)
 	_mode_label.add_theme_color_override("font_color", Color(0.45, 1.0, 0.62))
 	row.add_child(_mode_label)
 	row.add_child(_btn("编辑模式", func() -> void:
@@ -594,7 +613,79 @@ func _fill_right() -> void:
 		scroll.visible = i == 0
 		_tabs.add_child(scroll)
 		_tab_pages.append(scroll)
+	_asset_drawer_button = _btn("收起素材抽屉", _toggle_asset_drawer, 32)
+	col.add_child(_asset_drawer_button)
+	_asset_drawer = PanelContainer.new()
+	_asset_drawer.custom_minimum_size.y = 300
+	col.add_child(_asset_drawer)
+	var drawer_col := VBoxContainer.new()
+	drawer_col.add_theme_constant_override("separation", 6)
+	_asset_drawer.add_child(drawer_col)
+	var category_row := HBoxContainer.new()
+	category_row.add_theme_constant_override("separation", 4)
+	drawer_col.add_child(category_row)
+	_asset_category_buttons.clear()
+	for category in SceneContentController.CATEGORY_LABELS:
+		var category_id := str(category)
+		var category_button := _btn(str(SceneContentController.CATEGORY_LABELS[category]), func() -> void:
+			_select_asset_category(category_id)
+		)
+		category_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		category_row.add_child(category_button)
+		_asset_category_buttons[category_id] = category_button
+	var asset_scroll := ScrollContainer.new()
+	asset_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	asset_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	drawer_col.add_child(asset_scroll)
+	_asset_grid = GridContainer.new()
+	_asset_grid.columns = 2
+	_asset_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_asset_grid.add_theme_constant_override("h_separation", 6)
+	_asset_grid.add_theme_constant_override("v_separation", 6)
+	asset_scroll.add_child(_asset_grid)
+	drawer_col.add_child(_label("拖到画布放置；点击后再点画布也可以。", 12, false, true))
+	_rebuild_asset_drawer()
 	_select_tab(0)
+
+
+func _toggle_asset_drawer() -> void:
+	_asset_drawer_open = not _asset_drawer_open
+	_asset_drawer.visible = _asset_drawer_open
+	_asset_drawer_button.text = "收起素材抽屉" if _asset_drawer_open else "展开素材抽屉"
+
+
+func _select_asset_category(category: String) -> void:
+	_asset_category = category
+	_rebuild_asset_drawer()
+
+
+func _rebuild_asset_drawer() -> void:
+	if _asset_grid == null:
+		return
+	for child in _asset_grid.get_children():
+		_asset_grid.remove_child(child)
+		child.free()
+	for category in _asset_category_buttons:
+		var category_button: Button = _asset_category_buttons[category]
+		category_button.modulate = Color(1.15, 0.95, 0.55) if category == _asset_category else Color.WHITE
+	var button_script := load("res://scripts/director/asset_drag_button.gd") as Script
+	for asset in SceneContentController.assets_in_category(_asset_category):
+		var asset_id := str(asset.get("id", ""))
+		var tile: Button = button_script.new()
+		tile.asset_id = asset_id
+		tile.text = str(asset.get("label", asset_id))
+		tile.tooltip_text = "拖到画布放置；单击后可在画布点选位置"
+		tile.custom_minimum_size = Vector2(132, 112)
+		tile.focus_mode = Control.FOCUS_NONE
+		tile.expand_icon = true
+		tile.add_theme_constant_override("icon_max_width", 78)
+		tile.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		tile.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		var path := "res://art/sliced/%s.png" % asset_id
+		if ResourceLoader.exists(path):
+			tile.icon = load(path)
+		tile.pressed.connect(func() -> void: _choose_asset_for_canvas(asset_id))
+		_asset_grid.add_child(tile)
 
 
 func _select_tab(index: int) -> void:
@@ -607,9 +698,9 @@ func _select_tab(index: int) -> void:
 
 
 func _fill_bottom() -> void:
-	var row := HBoxContainer.new()
+	var row := HFlowContainer.new()
 	row.add_theme_constant_override("separation", 6)
-	row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	row.alignment = FlowContainer.ALIGNMENT_BEGIN
 	_bottom.add_child(row)
 	_mode_btns[Mode.SELECT] = _btn("选择", func() -> void: _set_mode(Mode.SELECT))
 	_mode_btns[Mode.BOX_WATER] = _btn("框选水域", func() -> void: _set_mode(Mode.BOX_WATER))
@@ -735,10 +826,10 @@ func _process(delta: float) -> void:
 		_play_btn.text = "暂停" if preview.is_playing() else "播放"
 	if _mode_label:
 		if preview.is_playing() or preview.is_paused() or mode == Mode.PREVIEW:
-			_mode_label.text = "● 播放模式"
+			_mode_label.text = "播放模式"
 			_mode_label.add_theme_color_override("font_color", Color(1.0, 0.72, 0.3))
 		else:
-			_mode_label.text = "● 编辑模式"
+			_mode_label.text = "编辑模式"
 			_mode_label.add_theme_color_override("font_color", Color(0.45, 1.0, 0.62))
 	if preview.is_playing() and _play_had_actor and not actors.any_playing():
 		_play_had_actor = false
@@ -832,6 +923,10 @@ func _on_left_mouse(event: InputEventMouseButton) -> void:
 	var world := _event_world(event)
 	var screen := _event_screen(event)
 	if event.pressed:
+		if _placing_asset:
+			_place_asset_at(_asset_choice, village.world_to_uv(world))
+			get_viewport().set_input_as_handled()
+			return
 		if mode == Mode.BOX_WATER:
 			if _drag == DragKind.BOX:
 				_box_b = world
@@ -1204,7 +1299,7 @@ func _chapter_card(chapter: Dictionary) -> PanelContainer:
 	var row := HBoxContainer.new()
 	panel.add_child(row)
 	var cid := str(chapter.get("id", ""))
-	var choose := _btn("▾ " + str(chapter.get("name", "章节")), func() -> void:
+	var choose := _btn("展开 " + str(chapter.get("name", "章节")), func() -> void:
 		selected_chapter_id = cid
 		repo.set_active_chapter_id(cid)
 		_refresh_scene_list()
@@ -1259,7 +1354,7 @@ func _scene_card(entry: Dictionary) -> PanelContainer:
 	var open_btn := _btn("打开", func() -> void: open_scene(sid))
 	row.add_child(open_btn)
 	var menu := MenuButton.new()
-	menu.text = "…"
+	menu.text = "操作"
 	menu.get_popup().add_item("重命名", 0)
 	menu.get_popup().add_item("删除", 1)
 	menu.get_popup().add_item("上移", 2)
@@ -1318,15 +1413,10 @@ func _fill_scene_tab() -> void:
 	inner.add_child(_btn("更换背景", _open_replace_background))
 	inner.add_child(_btn("空白画布", _replace_with_blank))
 	inner.add_child(_label("摆放元素", 13, true))
-	var assets := OptionButton.new()
-	for asset_id in SceneContentController.ASSETS:
-		assets.add_item(SceneContentController.asset_label(asset_id))
-		assets.set_item_metadata(assets.item_count - 1, asset_id)
-		if asset_id == _asset_choice:
-			assets.select(assets.item_count - 1)
-	assets.item_selected.connect(func(index: int) -> void: _asset_choice = str(assets.get_item_metadata(index)))
-	inner.add_child(assets)
-	inner.add_child(_btn("添加到画布中央", _add_element_clicked))
+	inner.add_child(_label("使用下方素材抽屉分类浏览；可直接拖到画布。", 12, false, true))
+	inner.add_child(_btn("展开素材抽屉", func() -> void:
+		if not _asset_drawer_open: _toggle_asset_drawer()
+	))
 	inner.add_child(_btn("套索圈选底图层", func() -> void: _set_mode(Mode.LASSO_REGION)))
 	var element := _element_by_id(selected_element_id)
 	if not element.is_empty():
@@ -1478,7 +1568,7 @@ func _fill_actor_tab() -> void:
 	if model:
 		for item in model.actors:
 			var actor_id := str(item.get("id", ""))
-			var choose := _btn(("● " if actor_id == selected_actor_id else "○ ") + str(item.get("display_name", "角色")), func() -> void:
+			var choose := _btn(("当前 " if actor_id == selected_actor_id else "选择 ") + str(item.get("display_name", "角色")), func() -> void:
 				selected_actor_id = actor_id
 				selected_point = -2
 				_refresh_inspector()
@@ -1616,6 +1706,8 @@ func _add_actor_clicked() -> void:
 func _set_mode(next: Mode) -> void:
 	if next != Mode.PREVIEW and (preview.is_playing() or preview.is_paused()):
 		return
+	if next != Mode.SELECT:
+		_placing_asset = false
 	if next != Mode.LASSO_WATER and next != Mode.LASSO_REGION:
 		_lasso_points = PackedVector2Array()
 	mode = next
@@ -1739,6 +1831,10 @@ func _on_escape() -> void:
 		return
 	if mode == Mode.PREVIEW:
 		_set_mode(Mode.SELECT)
+		return
+	if _placing_asset:
+		_placing_asset = false
+		_set_status("已取消素材放置。")
 		return
 	if _drag == DragKind.BOX:
 		_drag = DragKind.NONE
@@ -2097,24 +2193,53 @@ func _new_actor(character_id: String, start: Vector2, points: Array) -> Dictiona
 		}
 
 
-func _add_element_clicked() -> void:
-	if model == null:
+func can_drop_asset(_at_position: Vector2, data: Variant) -> bool:
+	if model == null or _preview_locked_edits() or not (data is Dictionary):
+		return false
+	return str(data.get("kind", "")) == "director_asset" and SceneContentController.asset_exists(str(data.get("asset_id", "")))
+
+
+func drop_asset(_at_position: Vector2, data: Variant) -> void:
+	if not can_drop_asset(_at_position, data):
 		return
+	_place_asset_at(str(data.get("asset_id", "")), village.world_to_uv(village.get_global_mouse_position()))
+
+
+func _choose_asset_for_canvas(asset_id: String) -> void:
+	if model == null:
+		_set_status("请先打开或新建场景。")
+		return
+	if _preview_locked_edits():
+		_set_status("播放模式中不能放置素材。")
+		return
+	_asset_choice = asset_id
+	_placing_asset = true
+	_set_mode(Mode.SELECT)
+	_set_status("已选择%s；请在画布点击放置，或直接把卡片拖到画布。" % SceneContentController.asset_label(asset_id))
+
+
+func _place_asset_at(asset_id: String, uv: Vector2) -> void:
+	if model == null or not SceneContentController.asset_exists(asset_id):
+		return
+	var asset := SceneContentController.asset_info(asset_id)
 	_begin_cmd()
 	var element := {
-		"id": DirectorSceneModel.new_hex_id("element_", 4), "asset_id": _asset_choice,
-		"display_name": SceneContentController.asset_label(_asset_choice), "enabled": true,
-		"position_uv": [0.5, 0.5], "layer": 0, "scale": 0.5,
+		"id": DirectorSceneModel.new_hex_id("element_", 4), "asset_id": asset_id,
+		"display_name": SceneContentController.asset_label(asset_id), "enabled": true,
+		"position_uv": DirectorSceneModel.vec2_to_arr(uv.clamp(Vector2.ZERO, Vector2.ONE)),
+		"layer": int(asset.get("default_layer", 0)),
+		"scale": float(asset.get("default_scale", 0.5)),
 	}
 	model.elements.append(element)
 	selected_element_id = str(element["id"])
 	selected_actor_id = ""
 	selected_water_id = ""
 	selected_region_id = ""
+	_placing_asset = false
 	_end_cmd()
 	_sync_world()
 	_refresh_inspector()
-	_set_status("已添加元素；在画布拖动其脚底锚点。")
+	_set_status("已放置%s；可拖动脚底锚点继续调整。" % SceneContentController.asset_label(asset_id))
 
 
 func _delete_selected_element() -> void:
@@ -2383,7 +2508,7 @@ func _update_catcher() -> void:
 	if _canvas_catch == null:
 		return
 	var grab := mode == Mode.BOX_WATER or mode == Mode.LASSO_WATER or mode == Mode.LASSO_REGION or mode == Mode.EDIT_ROUTE or _drag != DragKind.NONE
-	_canvas_catch.mouse_filter = Control.MOUSE_FILTER_STOP if grab else Control.MOUSE_FILTER_IGNORE
+	_canvas_catch.mouse_filter = Control.MOUSE_FILTER_STOP if grab else Control.MOUSE_FILTER_PASS
 
 
 func _apply_layout() -> void:
@@ -2472,7 +2597,7 @@ func _set_save_status(kind: String) -> void:
 		return
 	match kind:
 		"saving":
-			_save_label.text = "保存中…"
+			_save_label.text = "保存中"
 		"failed":
 			_save_label.text = "保存失败"
 		_:
@@ -2482,11 +2607,11 @@ func _set_save_status(kind: String) -> void:
 func _make_theme() -> Theme:
 	var theme := Theme.new()
 	var font: Font
-	if ResourceLoader.exists("res://fonts/droid_sans_fallback.ttf"):
-		font = load("res://fonts/droid_sans_fallback.ttf")
+	if ResourceLoader.exists("res://fonts/NotoSansCJKsc-Regular.otf"):
+		font = load("res://fonts/NotoSansCJKsc-Regular.otf")
 	else:
 		var sys := SystemFont.new()
-		sys.font_names = PackedStringArray(["WenQuanYi Micro Hei", "Droid Sans Fallback", "Microsoft YaHei", "Noto Sans CJK SC"])
+		sys.font_names = PackedStringArray(["Noto Sans CJK SC", "Microsoft YaHei", "WenQuanYi Micro Hei"])
 		font = sys
 	theme.set_default_font(font)
 	theme.set_default_font_size(14)

@@ -2,13 +2,13 @@
 
 importer="font_data_dynamic"
 type="FontFile"
-uid="uid://dymtjjswbbgng"
-path="res://.godot/imported/droid_sans_fallback.ttf-ada226e929f97f373da45ca84e5263d2.fontdata"
+uid="uid://dliq17xpe6gom"
+path="res://.godot/imported/NotoSansCJKsc-Regular.otf-6f40d34849318c2422dc3005a9c6d0a0.fontdata"
 
 [deps]
 
-source_file="res://fonts/droid_sans_fallback.ttf"
-dest_files=["res://.godot/imported/droid_sans_fallback.ttf-ada226e929f97f373da45ca84e5263d2.fontdata"]
+source_file="res://fonts/NotoSansCJKsc-Regular.otf"
+dest_files=["res://.godot/imported/NotoSansCJKsc-Regular.otf-6f40d34849318c2422dc3005a9c6d0a0.fontdata"]
 
 [params]
 
