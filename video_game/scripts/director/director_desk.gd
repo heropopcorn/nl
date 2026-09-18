@@ -1,10 +1,10 @@
 class_name DirectorDesk
 extends Control
 
-## Runtime director desk HUD: scenes, box water, one actor route, rain, preview.
+## Director Desk V2: chapter scenes, layered content, polygon water and ensemble playback.
 
-enum Mode { SELECT, BOX_WATER, EDIT_ROUTE, PREVIEW }
-enum DragKind { NONE, WATER_MOVE, WATER_RESIZE, WATER_DIR, ROUTE_POINT, BOX }
+enum Mode { SELECT, BOX_WATER, LASSO_WATER, LASSO_REGION, EDIT_ROUTE, PREVIEW }
+enum DragKind { NONE, WATER_MOVE, WATER_RESIZE, WATER_DIR, WATER_POINT, ROUTE_POINT, ELEMENT_MOVE, BOX }
 
 const HANDLE := 8.0
 const TOP_H := 48.0
@@ -12,17 +12,19 @@ const BOTTOM_H := 64.0
 const LEFT_W := 240.0
 const RIGHT_W := 320.0
 const NARROW := 900.0
-const HELP_TEXT := """导演台 P0
+const HELP_TEXT := """导演台 V2
 
-左栏管理多个场景（新建 / 打开 / 重命名 / 删除）。数据保存在本机 user://director_desk/，不是云存档。
+左栏按章节管理场景，章节和场景都可新建、重命名、删除和上下排序。数据保存在本机 user://director_desk/，不是云存档。
 
-水域：点击「框选水域」后在画布拖出矩形。每个水域可设流向、流速和碰撞。相邻可以共边，但不能面积重叠。
+元素：从房屋、树木等素材库添加，拖动脚底锚点摆放。整数层级越高越靠前；同层按脚底 Y 排序。
 
-角色：每场 1 人。可选农夫或蓝衣农夫，点击「编辑路线」后在画布加点。播放从出生点出发。
+底图区域与水域可用套索逐点圈选，双击、回点或 Enter 闭合。矩形水域还可拖四角缩放。水面有方向流纹，每块可设流向、流速和碰撞。
+
+角色：可添加多人；必须先点选角色，才显示和编辑其路线。每人可独立设置层级、速度、路线显隐与循环，播放时同时行走。
 
 天气：仅下雨，强度只影响画面。
 
-底栏：回到开头 / 播放 / 暂停 / 停止。预览时不能改水域或路线。WASD 仍可取消预览并走位，不会改已存路线。
+顶栏可清楚切换编辑模式 / 播放模式。本版播放当前场景；回到开头 / 播放 / 暂停 / 停止。播放时编辑锁定。
 
 Space 播放或暂停，Esc 取消或停止，Ctrl+S 保存，Ctrl+Z 撤销。"""
 
@@ -32,13 +34,19 @@ var model: DirectorSceneModel
 var mode: Mode = Mode.SELECT
 var water: WaterRegionController
 var actors := ActorController.new()
+var content: SceneContentController
 var weather: WeatherController
 var gizmos: DirectorGizmos
 var preview := PreviewController.new()
 var undo := DirectorUndoStack.new()
 
 var selected_water_id := ""
+var selected_actor_id := ""
+var selected_element_id := ""
+var selected_region_id := ""
+var selected_chapter_id := ""
 var selected_point := -2
+var _lasso_points: PackedVector2Array = PackedVector2Array()
 var _search_query := ""
 var _save_status := "saved"
 var _status_text := ""
@@ -57,6 +65,8 @@ var _pending_bytes: PackedByteArray = PackedByteArray()
 var _pending_filename := ""
 var _pending_open_id := ""
 var _new_source := "preset"
+var _asset_choice := "tree_oak"
+var _play_had_actor := false
 
 var _save_timer: Timer
 var _picker: Node
@@ -65,6 +75,7 @@ var _left: PanelContainer
 var _right: PanelContainer
 var _bottom: PanelContainer
 var _scene_name_label: Label
+var _mode_label: Label
 var _save_label: Label
 var _status_label: Label
 var _transport_label: Label
@@ -93,6 +104,13 @@ var _rename_id := ""
 var _delete_dialog: ConfirmationDialog
 var _delete_id := ""
 var _conflict_dialog: ConfirmationDialog
+var _new_chapter_dialog: ConfirmationDialog
+var _new_chapter_name: LineEdit
+var _rename_chapter_dialog: ConfirmationDialog
+var _rename_chapter_edit: LineEdit
+var _rename_chapter_id := ""
+var _delete_chapter_dialog: ConfirmationDialog
+var _delete_chapter_id := ""
 
 
 func setup(host: VillageSandbox) -> void:
@@ -129,6 +147,7 @@ func boot_with(p_repo: SceneRepository) -> void:
 	if repo.recovered_from_backup:
 		_set_status(repo.last_warning)
 	repo.ensure_example_if_empty()
+	selected_chapter_id = repo.active_chapter_id()
 	var active := repo.active_scene_id()
 	if active.is_empty():
 		_set_empty_scene()
@@ -151,6 +170,7 @@ func open_scene(scene_id: String, force: bool = false) -> void:
 		return
 	if repo.recovered_from_backup:
 		_set_status("已从备份恢复")
+	selected_chapter_id = repo.chapter_for_scene(scene_id)
 	_apply_loaded_model(loaded)
 	repo.set_active_scene_id(scene_id)
 
@@ -166,6 +186,14 @@ func render_gizmos(canvas: Node2D) -> void:
 		var rect := _normalized_world_rect(_box_a, _box_b)
 		canvas.draw_rect(rect, Color(0.45, 0.85, 1.0, 0.18), true)
 		canvas.draw_rect(rect, Color(0.55, 0.9, 1.0, 0.95), false, 2.0 / zoom)
+	if not _lasso_points.is_empty():
+		var live := PackedVector2Array()
+		for point in _lasso_points:
+			live.append(village.uv_to_world(point))
+		live.append(village.get_global_mouse_position())
+		canvas.draw_polyline(live, Color(0.45, 0.95, 0.72, 0.95), 2.5 / zoom, true)
+		for point in live:
+			canvas.draw_circle(point, handle * 0.65, Color(0.8, 1.0, 0.88, 1))
 	var overlap_ids := {}
 	for pair in model.overlapping_pairs():
 		overlap_ids[str(pair[0])] = true
@@ -173,13 +201,33 @@ func render_gizmos(canvas: Node2D) -> void:
 	for region in model.water_regions:
 		var rid := str(region.get("id", ""))
 		var rect := water.world_rect_of(region)
+		var poly := water.world_polygon_of(region)
 		var color := Color(1.0, 0.28, 0.22, 0.95) if overlap_ids.has(rid) else Color(0.45, 0.85, 1.0, 0.7)
-		canvas.draw_rect(rect, color, false, 2.0 / zoom if rid != selected_water_id else 3.0 / zoom)
+		if poly.size() >= 3:
+			var closed := poly.duplicate()
+			closed.append(poly[0])
+			canvas.draw_polyline(closed, color, 2.0 / zoom if rid != selected_water_id else 3.0 / zoom, true)
 		if rid == selected_water_id:
-			_draw_handles(canvas, rect, handle)
+			if str(region.get("shape", "rect")) == "polygon":
+				for point in poly:
+					canvas.draw_circle(point, handle * 0.7, Color.WHITE)
+			else:
+				_draw_handles(canvas, rect, handle)
 			_draw_flow_arrow(canvas, region, rect, handle)
-	var actor := actors.first_actor(model)
-	if not actor.is_empty():
+	for region in model.background_regions:
+		var rid := str(region.get("id", ""))
+		var poly := PackedVector2Array()
+		for point in DirectorSceneModel.points_from_value(region.get("points_uv", [])):
+			poly.append(village.uv_to_world(point))
+		if poly.size() >= 3:
+			var closed := poly.duplicate()
+			closed.append(poly[0])
+			canvas.draw_polyline(closed, Color(0.78, 0.52, 1.0, 0.95 if rid == selected_region_id else 0.48), 3.0 / zoom if rid == selected_region_id else 1.5 / zoom, true)
+	if not selected_element_id.is_empty():
+		var marker := content.element_world_position(selected_element_id)
+		canvas.draw_circle(marker, handle * 1.15, Color(1.0, 0.55, 0.2, 0.9), false, 2.0 / zoom)
+	var actor := actors.actor_by_id(model, selected_actor_id)
+	if not actor.is_empty() and bool(actor.get("route", {}).get("visible", true)):
 		var start := village.uv_to_world(DirectorSceneModel._vec2(actor.get("start_uv", [0.42, 0.42]), DirectorSceneModel.DEFAULT_START_UV))
 		canvas.draw_circle(start, handle * 1.2, Color(1.0, 0.86, 0.4, 0.95))
 		var route: Dictionary = actor.get("route", {})
@@ -194,6 +242,12 @@ func render_gizmos(canvas: Node2D) -> void:
 
 func run_runtime_selftest() -> PackedStringArray:
 	var errors: PackedStringArray = PackedStringArray()
+	var top_row := _top.get_child(0) as HBoxContainer
+	for control in top_row.get_children():
+		if control is Button and control.visible and control.size.x < 28.0:
+			errors.append("top action collapsed: %s width %.1f" % [(control as Button).text, control.size.x])
+		if control.visible and control.position.x + control.size.x > top_row.size.x + 1.0:
+			errors.append("top action clipped: %s" % control.name)
 	var temp := SceneRepository.new("user://director_desk_selftest/runtime_%d/" % Time.get_ticks_usec())
 	temp.v1_json_path = temp.root + "no_v1.json"
 	boot_with(temp)
@@ -290,6 +344,64 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("blue farmer modulate missing")
 	if str(model.actors[0].get("character_id", "")) != CharacterRegistry.FARMER_BLUE:
 		errors.append("character_id not saved in model")
+	# V2 layer rendering: higher integer wins; same-layer world positions retain Y order.
+	_begin_cmd()
+	model.elements.append({"id": "element_low", "asset_id": "tree_oak", "display_name": "树", "enabled": true, "position_uv": [0.35, 0.35], "layer": 2, "scale": 0.4})
+	model.elements.append({"id": "element_high", "asset_id": "house_market", "display_name": "房屋", "enabled": true, "position_uv": [0.35, 0.65], "layer": 5, "scale": 0.4})
+	model.elements.append({"id": "element_same_layer", "asset_id": "tree_pine", "display_name": "同层松树", "enabled": true, "position_uv": [0.45, 0.75], "layer": 2, "scale": 0.4})
+	model.background_regions.append({"id": "region_test", "name": "平台", "enabled": true, "points_uv": [[0.55, 0.55], [0.72, 0.55], [0.68, 0.70]], "layer": 4})
+	_end_cmd()
+	_sync_world()
+	if content.element_z_index("element_low") != 2 or content.element_z_index("element_high") != 5:
+		errors.append("element integer layer not applied")
+	if content.element_z_index("element_same_layer") != content.element_z_index("element_low") \
+			or content.element_world_position("element_same_layer").y <= content.element_world_position("element_low").y \
+			or not village.world.y_sort_enabled or not content.y_sort_enabled:
+		errors.append("same-layer elements should use feet Y-sort")
+	if content.region_z_index("region_test") != 4:
+		errors.append("background region layer not applied")
+	# Polygon water has individually draggable vertices.
+	_begin_cmd()
+	model.water_regions.append({"id": "water_poly", "name": "套索水域", "enabled": true, "shape": "polygon", "points_uv": [[0.60, 0.08], [0.78, 0.10], [0.76, 0.18], [0.58, 0.16]], "rect_uv": [0, 0, 0, 0], "flow_dir": [1, 0], "flow_speed": 0.35, "collision_enabled": true})
+	_end_cmd()
+	selected_water_id = "water_poly"
+	selected_point = 1
+	var old_vertex := DirectorSceneModel._vec2(model.water_regions.back().get("points_uv", [])[1], Vector2.ZERO)
+	_drag_water_point(village.uv_to_world(Vector2(0.80, 0.12)))
+	var new_vertex := DirectorSceneModel._vec2(model.water_regions.back().get("points_uv", [])[1], Vector2.ZERO)
+	if new_vertex.distance_to(old_vertex) < 0.01:
+		errors.append("polygon water control point did not move")
+	_sync_world()
+	# Two actors must move concurrently and honor independent speeds.
+	model.actors[0]["route"]["speed_px_per_sec"] = 80.0
+	var second_actor := _new_actor(CharacterRegistry.FARMER, Vector2(0.20, 0.80), [Vector2(0.70, 0.80)])
+	second_actor["route"]["speed_px_per_sec"] = 320.0
+	second_actor["layer"] = 3
+	model.actors.append(second_actor)
+	_sync_world()
+	var first_actor_id := str(model.actors[0].get("id", ""))
+	var second_actor_id := str(second_actor.get("id", ""))
+	var first_player := actors.player_for(first_actor_id)
+	var second_player := actors.player_for(second_actor_id)
+	var first_start := first_player.position
+	var second_start := second_player.position
+	if not _try_play():
+		errors.append("multi-actor play failed")
+	else:
+		for _i in 12:
+			await village.get_tree().physics_frame
+		var slow_distance := first_player.position.distance_to(first_start)
+		var fast_distance := second_player.position.distance_to(second_start)
+		if slow_distance < 1.0 or fast_distance <= slow_distance * 1.8:
+			errors.append("actors did not honor independent speeds")
+		_pause_preview()
+		var first_paused := first_player.position
+		var second_paused := second_player.position
+		for _i in 5:
+			await village.get_tree().physics_frame
+		if first_player.position.distance_to(first_paused) > 1.0 or second_player.position.distance_to(second_paused) > 1.0:
+			errors.append("multi-actor pause moved a role")
+		_stop_preview(true)
 	_begin_cmd()
 	model.weather["enabled"] = true
 	model.weather["type"] = "rain"
@@ -300,6 +412,7 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("rain was not enabled")
 	# undo 50
 	var before := model.to_dict()
+	var canonical_before := DirectorSceneModel.from_dict(before).to_dict()
 	for i in 12:
 		_begin_cmd()
 		if model.water_regions.size() > 0:
@@ -310,8 +423,8 @@ func run_runtime_selftest() -> PackedStringArray:
 	for i in 12:
 		_undo()
 	var after := model.to_dict()
-	if str(before["water_regions"]) != str(after["water_regions"]):
-		errors.append("undo did not restore water rects")
+	if JSON.stringify(canonical_before["water_regions"]) != JSON.stringify(after["water_regions"]):
+		errors.append("undo did not restore water regions")
 	var img := Image.create(4000, 2000, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0.2, 0.35, 0.25, 1))
 	var uploaded := temp.create_uploaded_scene("缩放背景", img.save_png_to_buffer(), "big.png")
@@ -331,6 +444,9 @@ func _build_world_helpers() -> void:
 	water = WaterRegionController.new()
 	village.world.add_child(water)
 	water.setup(village)
+	content = SceneContentController.new()
+	village.world.add_child(content)
+	content.setup(village)
 	weather = WeatherController.new()
 	village.add_child(weather)
 	weather.setup()
@@ -360,6 +476,8 @@ func _build_hud() -> void:
 	_left = _chrome_panel()
 	_right = _chrome_panel()
 	_bottom = _chrome_panel()
+	_left.custom_minimum_size.x = LEFT_W
+	_right.custom_minimum_size.x = RIGHT_W
 	_top.z_index = 4
 	_left.z_index = 4
 	_right.z_index = 4
@@ -398,6 +516,14 @@ func _fill_top() -> void:
 	_scene_name_label = _label("未选择场景", 15, false)
 	_scene_name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(_scene_name_label)
+	_mode_label = _label("● 编辑模式", 14, true)
+	_mode_label.add_theme_color_override("font_color", Color(0.45, 1.0, 0.62))
+	row.add_child(_mode_label)
+	row.add_child(_btn("编辑模式", func() -> void:
+		if preview.is_playing() or preview.is_paused(): _stop_preview(true)
+		_set_mode(Mode.SELECT)
+	))
+	row.add_child(_btn("播放模式", func() -> void: _try_play()))
 	_save_label = _label("已保存", 13, false)
 	_save_label.clip_text = false
 	_save_label.custom_minimum_size = Vector2(96, 0)
@@ -415,7 +541,7 @@ func _fill_left() -> void:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 6)
 	_left.add_child(box)
-	box.add_child(_label("场景", 15, true))
+	box.add_child(_label("章节 / 场景", 15, true))
 	_search_edit = LineEdit.new()
 	_search_edit.placeholder_text = "搜索场景"
 	_search_edit.focus_mode = Control.FOCUS_CLICK
@@ -424,7 +550,10 @@ func _fill_left() -> void:
 		_refresh_scene_list()
 	)
 	box.add_child(_search_edit)
-	box.add_child(_btn("新建场景", _open_new_dialog))
+	var create_row := HBoxContainer.new()
+	create_row.add_child(_btn("新建章节", _open_new_chapter_dialog))
+	create_row.add_child(_btn("新建场景", _open_new_dialog))
+	box.add_child(create_row)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.custom_minimum_size = Vector2(0, 240)
@@ -484,6 +613,8 @@ func _fill_bottom() -> void:
 	_bottom.add_child(row)
 	_mode_btns[Mode.SELECT] = _btn("选择", func() -> void: _set_mode(Mode.SELECT))
 	_mode_btns[Mode.BOX_WATER] = _btn("框选水域", func() -> void: _set_mode(Mode.BOX_WATER))
+	_mode_btns[Mode.LASSO_WATER] = _btn("套索水域", func() -> void: _set_mode(Mode.LASSO_WATER))
+	_mode_btns[Mode.LASSO_REGION] = _btn("圈底图层", func() -> void: _set_mode(Mode.LASSO_REGION))
 	_mode_btns[Mode.EDIT_ROUTE] = _btn("编辑路线", func() -> void: _set_mode(Mode.EDIT_ROUTE))
 	for child in _mode_btns.values():
 		row.add_child(child)
@@ -559,6 +690,29 @@ func _build_dialogs() -> void:
 	_conflict_dialog.cancel_button_text = "修正问题"
 	_conflict_dialog.confirmed.connect(_abandon_and_open)
 	add_child(_conflict_dialog)
+	_new_chapter_dialog = ConfirmationDialog.new()
+	_new_chapter_dialog.title = "新建章节"
+	_new_chapter_dialog.ok_button_text = "创建"
+	_new_chapter_dialog.cancel_button_text = "取消"
+	_new_chapter_name = LineEdit.new()
+	_new_chapter_name.placeholder_text = "章节名称"
+	_new_chapter_dialog.add_child(_new_chapter_name)
+	_new_chapter_dialog.confirmed.connect(_confirm_new_chapter)
+	add_child(_new_chapter_dialog)
+	_rename_chapter_dialog = ConfirmationDialog.new()
+	_rename_chapter_dialog.title = "重命名章节"
+	_rename_chapter_dialog.ok_button_text = "确定"
+	_rename_chapter_dialog.cancel_button_text = "取消"
+	_rename_chapter_edit = LineEdit.new()
+	_rename_chapter_dialog.add_child(_rename_chapter_edit)
+	_rename_chapter_dialog.confirmed.connect(_confirm_rename_chapter)
+	add_child(_rename_chapter_dialog)
+	_delete_chapter_dialog = ConfirmationDialog.new()
+	_delete_chapter_dialog.title = "删除章节"
+	_delete_chapter_dialog.ok_button_text = "删除章节及其场景"
+	_delete_chapter_dialog.cancel_button_text = "取消"
+	_delete_chapter_dialog.confirmed.connect(_confirm_delete_chapter)
+	add_child(_delete_chapter_dialog)
 
 
 func _process(delta: float) -> void:
@@ -579,6 +733,16 @@ func _process(delta: float) -> void:
 		_transport_label.text = preview.status_text()
 	if _play_btn:
 		_play_btn.text = "暂停" if preview.is_playing() else "播放"
+	if _mode_label:
+		if preview.is_playing() or preview.is_paused() or mode == Mode.PREVIEW:
+			_mode_label.text = "● 播放模式"
+			_mode_label.add_theme_color_override("font_color", Color(1.0, 0.72, 0.3))
+		else:
+			_mode_label.text = "● 编辑模式"
+			_mode_label.add_theme_color_override("font_color", Color(0.45, 1.0, 0.62))
+	if preview.is_playing() and _play_had_actor and not actors.any_playing():
+		_play_had_actor = false
+		_on_ensemble_ended()
 
 
 func _input(event: InputEvent) -> void:
@@ -636,6 +800,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			_pop_route_point()
 			get_viewport().set_input_as_handled()
 			return
+		if key == KEY_ENTER and (mode == Mode.LASSO_WATER or mode == Mode.LASSO_REGION):
+			_finish_lasso()
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		_on_left_mouse(event)
 		return
@@ -679,6 +847,10 @@ func _on_left_mouse(event: InputEventMouseButton) -> void:
 				_set_status("框选水域：拖出矩形，或在对角再点一次结束。")
 			get_viewport().set_input_as_handled()
 			return
+		if mode == Mode.LASSO_WATER or mode == Mode.LASSO_REGION:
+			_click_lasso(world, event.double_click)
+			get_viewport().set_input_as_handled()
+			return
 		if mode == Mode.EDIT_ROUTE:
 			_click_route(world)
 			get_viewport().set_input_as_handled()
@@ -711,31 +883,63 @@ func _on_mouse_move(_event: InputEventMouseMotion) -> void:
 		_drag_resize_water(world)
 	elif _drag == DragKind.WATER_DIR:
 		_drag_water_dir(world)
+	elif _drag == DragKind.WATER_POINT:
+		_drag_water_point(world)
 	elif _drag == DragKind.ROUTE_POINT:
 		_drag_route_point(world)
+	elif _drag == DragKind.ELEMENT_MOVE:
+		_drag_move_element(world)
 
 
 func _click_select(world: Vector2) -> void:
-	var actor := actors.first_actor(model)
-	if not actor.is_empty():
-		var idx := _hit_route_index(world, actor)
-		if idx >= -1:
+	var zoom := village.camera.zoom.x if village.camera else 1.0
+	var hit_actor_id := actors.hit_actor(world, zoom)
+	if not hit_actor_id.is_empty():
+		selected_actor_id = hit_actor_id
+		selected_point = -1
+		selected_water_id = ""
+		selected_element_id = ""
+		selected_region_id = ""
+		_begin_cmd()
+		_drag = DragKind.ROUTE_POINT
+		_select_tab(2)
+		_refresh_inspector()
+		return
+	var selected_actor := actors.actor_by_id(model, selected_actor_id)
+	if not selected_actor.is_empty():
+		var idx := _hit_route_index(world, selected_actor)
+		if idx >= 0:
 			selected_point = idx
-			selected_water_id = ""
 			_begin_cmd()
 			_drag = DragKind.ROUTE_POINT
-			_select_tab(2)
-			_refresh_inspector()
 			return
+	var element_id := content.hit_element(world)
+	if not element_id.is_empty():
+		selected_element_id = element_id
+		selected_actor_id = ""
+		selected_water_id = ""
+		selected_region_id = ""
+		_begin_cmd()
+		_drag = DragKind.ELEMENT_MOVE
+		_select_tab(0)
+		_refresh_inspector()
+		return
 	var rid := water.hit_region(world, model)
 	if not rid.is_empty():
 		selected_water_id = rid
+		selected_actor_id = ""
+		selected_element_id = ""
+		selected_region_id = ""
 		selected_point = -2
 		_select_tab(1)
 		var region := _water_by_id(rid)
 		var rect := water.world_rect_of(region)
 		_begin_cmd()
-		if _near(world, _arrow_tip(region, rect)):
+		var vertex := _hit_water_vertex(region, world)
+		if vertex >= 0:
+			_drag = DragKind.WATER_POINT
+			selected_point = vertex
+		elif _near(world, _arrow_tip(region, rect)):
 			_drag = DragKind.WATER_DIR
 		else:
 			var corner := _hit_corner(rect, world)
@@ -746,16 +950,35 @@ func _click_select(world: Vector2) -> void:
 				_drag = DragKind.WATER_MOVE
 		_refresh_inspector()
 		return
+	var region_id := content.hit_background_region(world)
+	if not region_id.is_empty():
+		selected_region_id = region_id
+		selected_water_id = ""
+		selected_actor_id = ""
+		selected_element_id = ""
+		_select_tab(0)
+		_refresh_inspector()
+		return
 	selected_water_id = ""
+	selected_actor_id = ""
+	selected_element_id = ""
+	selected_region_id = ""
 	selected_point = -2
 	_refresh_inspector()
 
 
 func _click_route(world: Vector2) -> void:
-	if actors.first_actor(model).is_empty():
-		_set_status("请先添加角色。")
+	var hit_actor_id := actors.hit_actor(world, village.camera.zoom.x if village.camera else 1.0)
+	if not hit_actor_id.is_empty() and hit_actor_id != selected_actor_id:
+		selected_actor_id = hit_actor_id
+		selected_point = -2
+		_refresh_inspector()
+		_set_status("已选择角色；现在可编辑这名角色的路线。")
 		return
-	var actor := actors.first_actor(model)
+	var actor := actors.actor_by_id(model, selected_actor_id)
+	if actor.is_empty():
+		_set_status("请先在画布或角色列表点选一名角色。")
+		return
 	var idx := _hit_route_index(world, actor)
 	if idx >= -1:
 		selected_point = idx
@@ -808,16 +1031,66 @@ func _finish_box() -> void:
 		_set_status("已创建水域。")
 
 
+func _click_lasso(world: Vector2, double_click: bool) -> void:
+	var uv := _maybe_snap_uv(village.world_to_uv(world))
+	if _lasso_points.size() >= 3 and (double_click or uv.distance_to(_lasso_points[0]) * village.terrain_size().length() < 14.0):
+		_finish_lasso()
+		return
+	_lasso_points.append(uv)
+	_set_status("套索已有 %d 个点；双击、点回起点或按 Enter 闭合。" % _lasso_points.size())
+
+
+func _finish_lasso() -> void:
+	if _lasso_points.size() < 3:
+		_set_status("套索至少需要 3 个点。")
+		return
+	if DirectorSceneModel.polygon_area(_lasso_points) <= DirectorSceneModel.UV_EPS:
+		_set_status("套索区域太小。")
+		return
+	var points: Array = []
+	for point in _lasso_points:
+		points.append(DirectorSceneModel.vec2_to_arr(point))
+	_begin_cmd()
+	if mode == Mode.LASSO_WATER:
+		var water_id := DirectorSceneModel.new_hex_id("water_", 4)
+		model.water_regions.append({
+			"id": water_id, "name": "套索水域", "enabled": true, "shape": "polygon",
+			"points_uv": points, "rect_uv": [0, 0, 0, 0], "flow_dir": [0, 1],
+			"flow_speed": 0.22, "collision_enabled": true,
+		})
+		selected_water_id = water_id
+		selected_region_id = ""
+		_select_tab(1)
+	else:
+		var region_id := DirectorSceneModel.new_hex_id("region_", 4)
+		model.background_regions.append({
+			"id": region_id, "name": "底图区域", "enabled": true, "points_uv": points, "layer": 1,
+		})
+		selected_region_id = region_id
+		selected_water_id = ""
+		_select_tab(0)
+	_lasso_points = PackedVector2Array()
+	_end_cmd()
+	_sync_world()
+	_refresh_inspector()
+	_set_mode(Mode.SELECT)
+	_set_status("已创建圈选区域。" if not model.has_water_overlap() else "水域不能重叠")
+
+
 func _apply_loaded_model(loaded: DirectorSceneModel) -> void:
 	_loading = true
 	model = loaded
 	undo.clear()
 	_dirty = false
 	selected_water_id = ""
+	selected_actor_id = str(loaded.actors[0].get("id", "")) if not loaded.actors.is_empty() else ""
+	selected_element_id = ""
+	selected_region_id = ""
+	_lasso_points = PackedVector2Array()
 	selected_point = -2
 	preview.state = PreviewController.State.STOPPED
 	preview.entered_preview = false
-	village.player.stop_path("replace")
+	actors.stop_all("replace")
 	_sync_world()
 	_loading = false
 	_set_save_status("saved")
@@ -834,19 +1107,16 @@ func _sync_world() -> void:
 		village.hide_legacy_water()
 		water.rebuild(null)
 		weather.apply(null)
+		content.rebuild(null)
+		actors.clear(village)
 		_empty_label.visible = true
 		return
 	_empty_label.visible = false
 	_apply_background()
+	content.rebuild(model)
 	water.rebuild(model)
 	_apply_legacy()
-	var actor := actors.first_actor(model)
-	if actor.is_empty():
-		actors.apply_appearance(village.player, CharacterRegistry.FARMER)
-	else:
-		actors.apply_appearance(village.player, str(actor.get("character_id", CharacterRegistry.FARMER)))
-		if preview.is_stopped():
-			actors.place_at_start(village, model)
+	actors.rebuild(village, model, preview.is_stopped())
 	weather.apply(model)
 	_refresh_mode_buttons()
 
@@ -894,6 +1164,8 @@ func _set_empty_scene() -> void:
 	undo.clear()
 	village.hide_legacy_water()
 	water.rebuild(null)
+	content.rebuild(null)
+	actors.clear(village)
 	weather.apply(null)
 	_empty_label.visible = true
 	_scene_name_label.text = "未选择场景"
@@ -917,17 +1189,54 @@ func _refresh_scene_list() -> void:
 		child.free()
 	if model == null:
 		_scene_name_label.text = "未选择场景"
-	for entry in repo.list_entries():
-		var name := str(entry.get("name", ""))
-		if not _search_query.is_empty() and name.findn(_search_query) < 0:
-			continue
-		_scene_box.add_child(_scene_card(entry))
+	for chapter in repo.list_chapters():
+		var cid := str(chapter.get("id", ""))
+		_scene_box.add_child(_chapter_card(chapter))
+		for entry in repo.list_entries(cid):
+			var scene_name := str(entry.get("name", ""))
+			if not _search_query.is_empty() and scene_name.findn(_search_query) < 0 and str(chapter.get("name", "")).findn(_search_query) < 0:
+				continue
+			_scene_box.add_child(_scene_card(entry))
+
+
+func _chapter_card(chapter: Dictionary) -> PanelContainer:
+	var panel := PanelContainer.new()
+	var row := HBoxContainer.new()
+	panel.add_child(row)
+	var cid := str(chapter.get("id", ""))
+	var choose := _btn("▾ " + str(chapter.get("name", "章节")), func() -> void:
+		selected_chapter_id = cid
+		repo.set_active_chapter_id(cid)
+		_refresh_scene_list()
+	)
+	choose.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(choose)
+	var menu := MenuButton.new()
+	menu.text = "章节操作"
+	menu.get_popup().add_item("上移", 0)
+	menu.get_popup().add_item("下移", 1)
+	menu.get_popup().add_item("重命名", 2)
+	menu.get_popup().add_item("删除", 3)
+	menu.get_popup().id_pressed.connect(func(id: int) -> void:
+		match id:
+			0: repo.move_chapter(cid, -1); _refresh_scene_list()
+			1: repo.move_chapter(cid, 1); _refresh_scene_list()
+			2: _open_rename_chapter(cid, str(chapter.get("name", "")))
+			3: _open_delete_chapter(cid, str(chapter.get("name", "")))
+	)
+	row.add_child(menu)
+	if cid == selected_chapter_id:
+		panel.modulate = Color(1.08, 1.02, 0.78)
+	return panel
 
 
 func _scene_card(entry: Dictionary) -> PanelContainer:
 	var panel := PanelContainer.new()
 	var row := HBoxContainer.new()
 	panel.add_child(row)
+	var indent := Control.new()
+	indent.custom_minimum_size.x = 12
+	row.add_child(indent)
 	var thumb := TextureRect.new()
 	thumb.custom_minimum_size = Vector2(72, 40)
 	thumb.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -953,11 +1262,19 @@ func _scene_card(entry: Dictionary) -> PanelContainer:
 	menu.text = "…"
 	menu.get_popup().add_item("重命名", 0)
 	menu.get_popup().add_item("删除", 1)
+	menu.get_popup().add_item("上移", 2)
+	menu.get_popup().add_item("下移", 3)
 	menu.get_popup().id_pressed.connect(func(id: int) -> void:
 		if id == 0:
 			_open_rename(sid, str(entry.get("name", "")))
 		elif id == 1:
 			_open_delete(sid, str(entry.get("name", "")))
+		elif id == 2:
+			repo.move_scene(sid, -1)
+			_refresh_scene_list()
+		elif id == 3:
+			repo.move_scene(sid, 1)
+			_refresh_scene_list()
 	)
 	row.add_child(menu)
 	if model and sid == model.scene_id:
@@ -1000,6 +1317,57 @@ func _fill_scene_tab() -> void:
 		return
 	inner.add_child(_btn("更换背景", _open_replace_background))
 	inner.add_child(_btn("空白画布", _replace_with_blank))
+	inner.add_child(_label("摆放元素", 13, true))
+	var assets := OptionButton.new()
+	for asset_id in SceneContentController.ASSETS:
+		assets.add_item(SceneContentController.asset_label(asset_id))
+		assets.set_item_metadata(assets.item_count - 1, asset_id)
+		if asset_id == _asset_choice:
+			assets.select(assets.item_count - 1)
+	assets.item_selected.connect(func(index: int) -> void: _asset_choice = str(assets.get_item_metadata(index)))
+	inner.add_child(assets)
+	inner.add_child(_btn("添加到画布中央", _add_element_clicked))
+	inner.add_child(_btn("套索圈选底图层", func() -> void: _set_mode(Mode.LASSO_REGION)))
+	var element := _element_by_id(selected_element_id)
+	if not element.is_empty():
+		inner.add_child(_label("当前元素：" + str(element.get("display_name", "元素")), 13, true))
+		inner.add_child(_label("显示层级（越高越靠前）", 12, false))
+		var element_layer := SpinBox.new()
+		element_layer.min_value = -100
+		element_layer.max_value = 100
+		element_layer.step = 1
+		element_layer.value = int(element.get("layer", 0))
+		element_layer.value_changed.connect(func(value: float) -> void:
+			if _loading: return
+			_begin_cmd(); element["layer"] = int(value); _end_cmd(); _sync_world()
+		)
+		inner.add_child(element_layer)
+		inner.add_child(_label("缩放", 12, false))
+		var element_scale := HSlider.new()
+		element_scale.min_value = 0.1
+		element_scale.max_value = 2.0
+		element_scale.step = 0.05
+		element_scale.value = float(element.get("scale", 0.5))
+		element_scale.drag_started.connect(_begin_cmd)
+		element_scale.value_changed.connect(func(value: float) -> void: element["scale"] = value; content.rebuild(model))
+		element_scale.drag_ended.connect(func(_changed: bool) -> void: _end_cmd())
+		inner.add_child(element_scale)
+		inner.add_child(_btn("删除当前元素", _delete_selected_element))
+	var bg_region := _background_region_by_id(selected_region_id)
+	if not bg_region.is_empty():
+		inner.add_child(_label("当前底图区域", 13, true))
+		inner.add_child(_label("区域显示层级", 12, false))
+		var region_layer := SpinBox.new()
+		region_layer.min_value = -100
+		region_layer.max_value = 100
+		region_layer.step = 1
+		region_layer.value = int(bg_region.get("layer", 1))
+		region_layer.value_changed.connect(func(value: float) -> void:
+			if _loading: return
+			_begin_cmd(); bg_region["layer"] = int(value); _end_cmd(); _sync_world()
+		)
+		inner.add_child(region_layer)
+		inner.add_child(_btn("删除底图区域", _delete_selected_region))
 	inner.add_child(_checkbox("显示内置道具", bool(model.editor.get("show_baked_props", true)), func(v: bool) -> void:
 		if _loading: return
 		_begin_cmd()
@@ -1044,11 +1412,15 @@ func _fill_water_tab() -> void:
 		return
 	_clear_inner(inner)
 	inner.add_child(_label("水域", 14, true))
-	inner.add_child(_btn("框选水域", func() -> void: _set_mode(Mode.BOX_WATER)))
+	var water_create := HBoxContainer.new()
+	water_create.add_child(_btn("矩形框选", func() -> void: _set_mode(Mode.BOX_WATER)))
+	water_create.add_child(_btn("套索 / 多边形", func() -> void: _set_mode(Mode.LASSO_WATER)))
+	inner.add_child(water_create)
 	var region := _water_by_id(selected_water_id)
 	if region.is_empty():
 		inner.add_child(_label("在画布框选或点选一块水域。", 13, false))
 		return
+	inner.add_child(_label("形状：%s" % ("多边形" if str(region.get("shape", "rect")) == "polygon" else "可缩放矩形"), 12, false))
 	inner.add_child(_label("流向", 13, true))
 	var dirs := [
 		["上", Vector2(0, -1)], ["下", Vector2(0, 1)], ["左", Vector2(-1, 0)], ["右", Vector2(1, 0)],
@@ -1101,12 +1473,22 @@ func _fill_actor_tab() -> void:
 	if inner == null:
 		return
 	_clear_inner(inner)
-	inner.add_child(_label("角色", 14, true))
+	inner.add_child(_label("多角色", 14, true))
 	inner.add_child(_btn("添加角色", _add_actor_clicked, 36.0))
-	var actor := actors.first_actor(model) if model else {}
+	if model:
+		for item in model.actors:
+			var actor_id := str(item.get("id", ""))
+			var choose := _btn(("● " if actor_id == selected_actor_id else "○ ") + str(item.get("display_name", "角色")), func() -> void:
+				selected_actor_id = actor_id
+				selected_point = -2
+				_refresh_inspector()
+			)
+			inner.add_child(choose)
+	var actor := actors.actor_by_id(model, selected_actor_id) if model else {}
 	if actor.is_empty():
-		inner.add_child(_label("尚未添加角色。P0 每场 1 人。", 13, false))
+		inner.add_child(_label("点画布上的角色或上方列表，才会显示和编辑该角色路线。", 13, false, true))
 		return
+	inner.add_child(_label("当前：" + str(actor.get("display_name", "角色")), 13, true))
 	inner.add_child(_label("角色类型", 13, true))
 	var opt := OptionButton.new()
 	opt.add_item("农夫", 0)
@@ -1121,6 +1503,25 @@ func _fill_actor_tab() -> void:
 	)
 	inner.add_child(opt)
 	inner.add_child(_btn("编辑路线", func() -> void: _set_mode(Mode.EDIT_ROUTE)))
+	inner.add_child(_checkbox("显示这条路线", bool(actor.get("route", {}).get("visible", true)), func(v: bool) -> void:
+		if _loading: return
+		_begin_cmd()
+		var r: Dictionary = actor.get("route", {})
+		r["visible"] = v
+		actor["route"] = r
+		_end_cmd()
+	))
+	inner.add_child(_label("显示层级（同层按脚底 Y 排序）", 12, false, true))
+	var actor_layer := SpinBox.new()
+	actor_layer.min_value = -100
+	actor_layer.max_value = 100
+	actor_layer.step = 1
+	actor_layer.value = int(actor.get("layer", 0))
+	actor_layer.value_changed.connect(func(value: float) -> void:
+		if _loading: return
+		_begin_cmd(); actor["layer"] = int(value); _end_cmd(); _sync_world()
+	)
+	inner.add_child(actor_layer)
 	inner.add_child(_label("速度", 13, true))
 	var speed := HSlider.new()
 	var route: Dictionary = actor.get("route", {})
@@ -1150,9 +1551,12 @@ func _fill_actor_tab() -> void:
 		actor["route"] = route
 		_end_cmd()
 	))
-	inner.add_child(_btn("删除角色", func() -> void:
+	inner.add_child(_btn("删除当前角色", func() -> void:
 		_begin_cmd()
-		model.actors.clear()
+		for i in range(model.actors.size() - 1, -1, -1):
+			if str(model.actors[i].get("id", "")) == selected_actor_id:
+				model.actors.remove_at(i)
+		selected_actor_id = str(model.actors[0].get("id", "")) if not model.actors.is_empty() else ""
 		_end_cmd()
 		_sync_world()
 		_refresh_inspector()
@@ -1194,21 +1598,26 @@ func _fill_weather_tab() -> void:
 func _add_actor_clicked() -> void:
 	if model == null:
 		return
-	if model.actors.size() >= 1:
-		_set_status("P0 每场只能有一个角色。")
+	if model.actors.size() >= DirectorSceneModel.ACTORS_MAX_PARSE:
+		_set_status("角色数量已达上限。")
 		return
 	_begin_cmd()
-	_set_actor(CharacterRegistry.FARMER, village.world_to_uv(village.player.position), [])
+	var offset := Vector2(0.04 * (model.actors.size() % 5), 0.04 * (model.actors.size() % 3))
+	var actor := _new_actor(CharacterRegistry.FARMER, (Vector2(0.42, 0.42) + offset).clamp(Vector2.ZERO, Vector2.ONE), [])
+	model.actors.append(actor)
+	selected_actor_id = str(actor.get("id", ""))
 	_end_cmd()
 	_sync_world()
 	_select_tab(2)
 	_refresh_inspector()
-	_set_status("已添加角色，可编辑路线。")
+	_set_status("已添加角色。点选角色后编辑它自己的路线。")
 
 
 func _set_mode(next: Mode) -> void:
 	if next != Mode.PREVIEW and (preview.is_playing() or preview.is_paused()):
 		return
+	if next != Mode.LASSO_WATER and next != Mode.LASSO_REGION:
+		_lasso_points = PackedVector2Array()
 	mode = next
 	_refresh_mode_buttons()
 	_update_catcher()
@@ -1217,6 +1626,12 @@ func _set_mode(next: Mode) -> void:
 			_set_status("选择：左键选对象，右键拖动画布。")
 		Mode.BOX_WATER:
 			_set_status("框选水域：拖出矩形，或在对角再点一次结束。")
+		Mode.LASSO_WATER:
+			_lasso_points = PackedVector2Array()
+			_set_status("套索水域：逐点勾画，双击、回点或 Enter 闭合。")
+		Mode.LASSO_REGION:
+			_lasso_points = PackedVector2Array()
+			_set_status("圈底图层：逐点勾画要抬高/压低的底图区域。")
 		Mode.EDIT_ROUTE:
 			_set_status("编辑路线：左键加点，Backspace 删末点。")
 		Mode.PREVIEW:
@@ -1227,7 +1642,7 @@ func _refresh_mode_buttons() -> void:
 	for key in _mode_btns:
 		var button: Button = _mode_btns[key]
 		button.modulate = Color(1.15, 0.95, 0.55) if key == mode else Color.WHITE
-		button.disabled = model == null
+		button.disabled = model == null or mode == Mode.PREVIEW
 
 
 func _toggle_play() -> void:
@@ -1243,50 +1658,44 @@ func _try_play() -> bool:
 	if model.has_water_overlap():
 		_set_status("水域不能重叠")
 		return false
-	var actor := actors.first_actor(model)
-	if actor.is_empty():
+	if model.actors.is_empty():
 		_set_status("请先添加角色。")
 		return false
-	if not actors.can_play(actor):
-		_set_status("路线至少需要 2 个点才能播放")
-		return false
-	if preview.is_paused() and village.player.is_playing_path():
-		village.player.resume_path()
+	if preview.is_paused() and actors.any_playing():
+		actors.resume_all()
 		preview.state = PreviewController.State.PLAYING
+		_play_had_actor = true
 		_set_mode(Mode.PREVIEW)
 		return true
-	var points := actors.playback_world_points(village, actor)
-	if points.size() < 2:
-		_set_status("路线至少需要 2 个点才能播放")
-		return false
-	var route: Dictionary = actor.get("route", {})
-	var ignore := str(route.get("collision_mode", "ignore")) != "world"
-	var speed := float(route.get("speed_px_per_sec", 210))
 	preview.mark_enter_preview(mode if mode != Mode.PREVIEW else preview.previous_mode)
-	if not village.player.play_path(points, bool(route.get("loop", false)), ignore, speed):
-		_set_status("无法播放路线")
+	actors.place_all_at_start(village, model)
+	var started := actors.play_all(village, model)
+	if started == 0:
+		_set_status("至少一名角色的路线需要包含起点之外的目标点")
 		return false
+	_play_had_actor = true
 	preview.state = PreviewController.State.PLAYING
 	preview.clock = 0.0
 	_set_mode(Mode.PREVIEW)
-	_set_status("播放中")
+	_set_status("播放当前场景：%d 名角色各按自己的速度行走" % started)
 	return true
 
 
 func _pause_preview() -> void:
-	if not village.player.is_playing_path():
+	if not actors.any_playing():
 		return
-	village.player.pause_path()
+	actors.pause_all()
 	preview.state = PreviewController.State.PAUSED
 	_set_status("已暂停")
 
 
 func _stop_preview(change_mode: bool) -> void:
-	village.player.stop_path("stop")
+	actors.stop_all("stop")
+	_play_had_actor = false
 	preview.state = PreviewController.State.STOPPED
 	preview.clock = 0.0
 	if model:
-		actors.place_at_start(village, model)
+		actors.place_all_at_start(village, model)
 	if change_mode and preview.entered_preview:
 		var prev := preview.mark_leave_preview()
 		_set_mode(prev as Mode)
@@ -1299,19 +1708,29 @@ func _on_path_ended(reason: String) -> void:
 	if reason == "replace" or reason == "stop":
 		return
 	if reason == "cancel":
+		actors.stop_all("stop")
 		preview.state = PreviewController.State.STOPPED
+		_play_had_actor = false
+		if model:
+			actors.place_all_at_start(village, model)
 		if preview.entered_preview:
 			_set_mode(preview.mark_leave_preview() as Mode)
 		_set_status("已停止预览，WASD 走位不会改路线")
 		return
 	if reason == "end":
-		if preview.loop_preview:
-			_try_play()
-			return
+		if not actors.any_playing():
+			_on_ensemble_ended()
+
+
+func _on_ensemble_ended() -> void:
+	if preview.loop_preview:
 		preview.state = PreviewController.State.STOPPED
-		if preview.entered_preview:
-			_set_mode(preview.mark_leave_preview() as Mode)
-		_set_status("播放结束")
+		_try_play()
+		return
+	preview.state = PreviewController.State.STOPPED
+	if preview.entered_preview:
+		_set_mode(preview.mark_leave_preview() as Mode)
+	_set_status("当前场景播放结束")
 
 
 func _on_escape() -> void:
@@ -1325,6 +1744,11 @@ func _on_escape() -> void:
 		_drag = DragKind.NONE
 		_update_catcher()
 		_set_status("已取消框选。")
+		return
+	if mode == Mode.LASSO_WATER or mode == Mode.LASSO_REGION:
+		_lasso_points = PackedVector2Array()
+		_set_mode(Mode.SELECT)
+		_set_status("已取消套索。")
 		return
 	if mode != Mode.SELECT:
 		_set_mode(Mode.SELECT)
@@ -1420,12 +1844,65 @@ func _notification(what: int) -> void:
 
 
 func _open_new_dialog() -> void:
+	if selected_chapter_id.is_empty():
+		selected_chapter_id = repo.active_chapter_id()
+	repo.set_active_chapter_id(selected_chapter_id)
 	_new_source = "preset"
 	_pending_bytes = PackedByteArray()
 	_pending_filename = ""
 	_new_name.text = ""
 	_new_dialog.popup_centered()
 	_new_name.grab_focus()
+
+
+func _open_new_chapter_dialog() -> void:
+	_new_chapter_name.text = ""
+	_new_chapter_dialog.popup_centered()
+	_new_chapter_name.grab_focus()
+
+
+func _confirm_new_chapter() -> void:
+	var chapter_id := repo.create_chapter(_new_chapter_name.text)
+	if chapter_id.is_empty():
+		_set_status(repo.last_error)
+		return
+	selected_chapter_id = chapter_id
+	_refresh_scene_list()
+	_set_status("已新建章节。")
+
+
+func _open_rename_chapter(chapter_id: String, current: String) -> void:
+	_rename_chapter_id = chapter_id
+	_rename_chapter_edit.text = current
+	_rename_chapter_dialog.popup_centered()
+	_rename_chapter_edit.grab_focus()
+
+
+func _confirm_rename_chapter() -> void:
+	if not repo.rename_chapter(_rename_chapter_id, _rename_chapter_edit.text):
+		_set_status(repo.last_error)
+		return
+	_refresh_scene_list()
+
+
+func _open_delete_chapter(chapter_id: String, current: String) -> void:
+	_delete_chapter_id = chapter_id
+	_delete_chapter_dialog.dialog_text = "确定删除章节「%s」及其全部场景？此操作不可撤销。" % current
+	_delete_chapter_dialog.popup_centered()
+
+
+func _confirm_delete_chapter() -> void:
+	var deleting_current := model != null and repo.chapter_for_scene(model.scene_id) == _delete_chapter_id
+	if not repo.delete_chapter(_delete_chapter_id):
+		_set_status(repo.last_error)
+		return
+	selected_chapter_id = repo.active_chapter_id()
+	if deleting_current:
+		var next := repo.list_entries(selected_chapter_id)
+		if next.is_empty(): _set_empty_scene()
+		else: open_scene(str(next[0].get("id", "")), true)
+	_refresh_scene_list()
+	_set_status("已删除章节及其中场景。")
 
 
 func _confirm_new_scene() -> void:
@@ -1567,6 +2044,7 @@ func _add_water(uv: Rect2, dir: Vector2, id: String) -> void:
 		"id": id,
 		"name": "水域",
 		"enabled": true,
+		"shape": "rect",
 		"rect_uv": [DirectorSceneModel.snap6(uv.position.x), DirectorSceneModel.snap6(uv.position.y), DirectorSceneModel.snap6(uv.size.x), DirectorSceneModel.snap6(uv.size.y)],
 		"flow_dir": DirectorSceneModel.vec2_to_arr(flow),
 		"flow_speed": 0.22,
@@ -1588,27 +2066,95 @@ func _set_water_flow(id: String, dir: Vector2) -> void:
 
 
 func _set_actor(character_id: String, start: Vector2, points: Array) -> void:
+	var actor := _new_actor(character_id, start, points)
+	if model.actors.is_empty():
+		model.actors.append(actor)
+	else:
+		var keep_id := str(model.actors[0].get("id", actor.get("id", "")))
+		actor["id"] = keep_id
+		model.actors[0] = actor
+	selected_actor_id = str(actor.get("id", ""))
+
+
+func _new_actor(character_id: String, start: Vector2, points: Array) -> Dictionary:
 	var pts: Array = []
 	for item in points:
 		pts.append(DirectorSceneModel.vec2_to_arr(item))
-	if model.actors.is_empty():
-		model.actors.append({
+	return {
 			"id": DirectorSceneModel.new_hex_id("actor_", 4),
 			"character_id": character_id,
 			"display_name": CharacterRegistry.display_name(character_id),
 			"enabled": true,
 			"start_uv": DirectorSceneModel.vec2_to_arr(start),
+			"layer": 0,
 			"route": {
 				"points_uv": pts,
 				"speed_px_per_sec": 210.0,
 				"loop": false,
 				"collision_mode": "ignore",
+				"visible": true,
 			},
-		})
-	else:
-		model.actors[0]["character_id"] = character_id
-		model.actors[0]["start_uv"] = DirectorSceneModel.vec2_to_arr(start)
-		model.actors[0]["route"]["points_uv"] = pts
+		}
+
+
+func _add_element_clicked() -> void:
+	if model == null:
+		return
+	_begin_cmd()
+	var element := {
+		"id": DirectorSceneModel.new_hex_id("element_", 4), "asset_id": _asset_choice,
+		"display_name": SceneContentController.asset_label(_asset_choice), "enabled": true,
+		"position_uv": [0.5, 0.5], "layer": 0, "scale": 0.5,
+	}
+	model.elements.append(element)
+	selected_element_id = str(element["id"])
+	selected_actor_id = ""
+	selected_water_id = ""
+	selected_region_id = ""
+	_end_cmd()
+	_sync_world()
+	_refresh_inspector()
+	_set_status("已添加元素；在画布拖动其脚底锚点。")
+
+
+func _delete_selected_element() -> void:
+	_begin_cmd()
+	for i in range(model.elements.size() - 1, -1, -1):
+		if str(model.elements[i].get("id", "")) == selected_element_id:
+			model.elements.remove_at(i)
+	selected_element_id = ""
+	_end_cmd()
+	_sync_world()
+	_refresh_inspector()
+
+
+func _delete_selected_region() -> void:
+	_begin_cmd()
+	for i in range(model.background_regions.size() - 1, -1, -1):
+		if str(model.background_regions[i].get("id", "")) == selected_region_id:
+			model.background_regions.remove_at(i)
+	selected_region_id = ""
+	_end_cmd()
+	_sync_world()
+	_refresh_inspector()
+
+
+func _element_by_id(id: String) -> Dictionary:
+	if model == null:
+		return {}
+	for element in model.elements:
+		if str(element.get("id", "")) == id:
+			return element
+	return {}
+
+
+func _background_region_by_id(id: String) -> Dictionary:
+	if model == null:
+		return {}
+	for region in model.background_regions:
+		if str(region.get("id", "")) == id:
+			return region
+	return {}
 
 
 func _water_by_id(id: String) -> Dictionary:
@@ -1623,6 +2169,18 @@ func _water_by_id(id: String) -> Dictionary:
 func _drag_move_water(world: Vector2) -> void:
 	var region := _water_by_id(selected_water_id)
 	if region.is_empty():
+		return
+	if str(region.get("shape", "rect")) == "polygon":
+		var polygon := DirectorSceneModel.points_from_value(region.get("points_uv", []))
+		var bounds := DirectorSceneModel.polygon_bounds(polygon)
+		var desired := _maybe_snap_uv(village.world_to_uv(world))
+		var delta := desired - (bounds.position + bounds.size * 0.5)
+		delta.x = clampf(delta.x, -bounds.position.x, 1.0 - bounds.end.x)
+		delta.y = clampf(delta.y, -bounds.position.y, 1.0 - bounds.end.y)
+		var moved: Array = []
+		for point in polygon:
+			moved.append(DirectorSceneModel.vec2_to_arr(point + delta))
+		region["points_uv"] = moved
 		return
 	var rect := DirectorSceneModel.rect_from_region(region)
 	var uv := _maybe_snap_uv(village.world_to_uv(world))
@@ -1668,8 +2226,26 @@ func _drag_water_dir(world: Vector2) -> void:
 	_set_water_flow(selected_water_id, world - center)
 
 
+func _drag_water_point(world: Vector2) -> void:
+	var region := _water_by_id(selected_water_id)
+	if region.is_empty() or str(region.get("shape", "rect")) != "polygon":
+		return
+	var points: Array = region.get("points_uv", [])
+	if selected_point >= 0 and selected_point < points.size():
+		points[selected_point] = DirectorSceneModel.vec2_to_arr(_maybe_snap_uv(village.world_to_uv(world)))
+		region["points_uv"] = points
+
+
+func _drag_move_element(world: Vector2) -> void:
+	var element := _element_by_id(selected_element_id)
+	if element.is_empty():
+		return
+	element["position_uv"] = DirectorSceneModel.vec2_to_arr(_maybe_snap_uv(village.world_to_uv(world)))
+	content.rebuild(model)
+
+
 func _drag_route_point(world: Vector2) -> void:
-	var actor := actors.first_actor(model)
+	var actor := actors.actor_by_id(model, selected_actor_id)
 	if actor.is_empty():
 		return
 	var uv := _maybe_snap_uv(village.world_to_uv(world))
@@ -1685,7 +2261,7 @@ func _drag_route_point(world: Vector2) -> void:
 
 
 func _pop_route_point() -> void:
-	var actor := actors.first_actor(model)
+	var actor := actors.actor_by_id(model, selected_actor_id)
 	if actor.is_empty():
 		return
 	var route: Dictionary = actor.get("route", {})
@@ -1719,6 +2295,18 @@ func _hit_corner(rect: Rect2, world: Vector2) -> int:
 	var pts := [rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)]
 	for i in range(pts.size()):
 		if world.distance_to(pts[i]) <= lim:
+			return i
+	return -1
+
+
+func _hit_water_vertex(region: Dictionary, world: Vector2) -> int:
+	if str(region.get("shape", "rect")) != "polygon":
+		return -1
+	var zoom := village.camera.zoom.x if village.camera else 1.0
+	var limit := HANDLE * 1.6 / zoom
+	var points: Array = region.get("points_uv", [])
+	for i in range(points.size()):
+		if village.uv_to_world(DirectorSceneModel._vec2(points[i], Vector2.ZERO)).distance_to(world) <= limit:
 			return i
 	return -1
 
@@ -1794,7 +2382,7 @@ func _screen_mouse() -> Vector2:
 func _update_catcher() -> void:
 	if _canvas_catch == null:
 		return
-	var grab := mode == Mode.BOX_WATER or mode == Mode.EDIT_ROUTE or _drag != DragKind.NONE
+	var grab := mode == Mode.BOX_WATER or mode == Mode.LASSO_WATER or mode == Mode.LASSO_REGION or mode == Mode.EDIT_ROUTE or _drag != DragKind.NONE
 	_canvas_catch.mouse_filter = Control.MOUSE_FILTER_STOP if grab else Control.MOUSE_FILTER_IGNORE
 
 
@@ -1860,7 +2448,8 @@ func _toggle_drawer(left_side: bool) -> void:
 func _shortcuts_blocked() -> bool:
 	if _picker and _picker.has_method("is_open") and _picker.is_open():
 		return true
-	if _new_dialog.visible or _rename_dialog.visible or _delete_dialog.visible or _help.visible or _conflict_dialog.visible:
+	if _new_dialog.visible or _rename_dialog.visible or _delete_dialog.visible or _help.visible or _conflict_dialog.visible \
+			or _new_chapter_dialog.visible or _rename_chapter_dialog.visible or _delete_chapter_dialog.visible:
 		return true
 	var focus := get_viewport().gui_get_focus_owner()
 	return focus is LineEdit or focus is TextEdit

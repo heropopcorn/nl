@@ -11,12 +11,116 @@ func run_model_and_repo() -> PackedStringArray:
 	_collect(errors, _test_overlap_and_edge())
 	_collect(errors, _test_validation_edges())
 	_collect(errors, _test_repository_crud())
+	_collect(errors, _test_chapter_crud_and_order())
+	_collect(errors, _test_index_v1_chapter_migration())
+	_collect(errors, _test_v2_layers_and_polygons())
 	_collect(errors, _test_index_rebuild())
 	_collect(errors, _test_atomic_backup())
 	_collect(errors, _test_path_safety())
 	_collect(errors, _test_upload_resize())
 	_collect(errors, _test_v1_migration())
 	_collect(errors, _test_corrupt_recovery())
+	return errors
+
+
+func _test_chapter_crud_and_order() -> PackedStringArray:
+	var errors: PackedStringArray = PackedStringArray()
+	var repo := _temp_repo("chapters")
+	repo.rebuild_index()
+	var first := repo.active_chapter_id()
+	if first.is_empty():
+		errors.append("default chapter missing")
+	var second := repo.create_chapter("第二章")
+	if second.is_empty():
+		errors.append("chapter create failed")
+		_cleanup_repo(repo)
+		return errors
+	repo.set_active_chapter_id(second)
+	var a := repo.create_preset_scene("第二章第一场")
+	var b := repo.create_blank_scene("第二章第二场")
+	if a == null or b == null or repo.list_entries(second).size() != 2:
+		errors.append("scenes should be created below active chapter")
+	elif str(repo.list_entries(second)[0].get("id", "")) != a.scene_id:
+		errors.append("scene order should preserve creation order")
+	if not repo.move_scene(b.scene_id, -1) or str(repo.list_entries(second)[0].get("id", "")) != b.scene_id:
+		errors.append("scene move up failed")
+	if not repo.rename_chapter(second, "雨夜章") or str(repo.list_chapters()[1].get("name", "")) != "雨夜章":
+		errors.append("chapter rename failed")
+	if not repo.move_chapter(second, -1) or str(repo.list_chapters()[0].get("id", "")) != second:
+		errors.append("chapter move failed")
+	if not repo.delete_chapter(second):
+		errors.append("chapter delete failed")
+	if not repo.list_entries(second).is_empty() or repo.load_scene(a.scene_id) != null:
+		errors.append("chapter delete should delete child scenes")
+	if repo.delete_chapter(first):
+		errors.append("last chapter must be protected")
+	_cleanup_repo(repo)
+	return errors
+
+
+func _test_v2_layers_and_polygons() -> PackedStringArray:
+	var errors: PackedStringArray = PackedStringArray()
+	var model := _valid_stub()
+	model.elements = [
+		{"id": "element_a", "asset_id": "tree_oak", "display_name": "前树", "enabled": true, "position_uv": [0.4, 0.7], "layer": 3, "scale": 0.5},
+		{"id": "element_b", "asset_id": "house_market", "display_name": "后屋", "enabled": true, "position_uv": [0.4, 0.2], "layer": 3, "scale": 0.5},
+	]
+	model.background_regions = [
+		{"id": "region_a", "name": "平台", "enabled": true, "points_uv": [[0.1, 0.1], [0.4, 0.1], [0.3, 0.3]], "layer": 2},
+	]
+	model.water_regions = [{
+		"id": "water_poly", "name": "弯河", "enabled": true, "shape": "polygon",
+		"points_uv": [[0.55, 0.1], [0.8, 0.15], [0.75, 0.35], [0.5, 0.3]],
+		"rect_uv": [0, 0, 0, 0], "flow_dir": [1, 0], "flow_speed": 0.4, "collision_enabled": true,
+	}]
+	model.actors = [_actor("actor_a", Vector2(0.2, 0.4), 1, 120.0)]
+	model.validate()
+	if not model.is_valid():
+		errors.append("v2 polygon/layer model invalid: %s" % ", ".join(model.errors))
+	var again := DirectorSceneModel.from_json_text(model.to_json_text())
+	if again.elements.size() != 2 or int(again.elements[0].get("layer", -1)) != 3:
+		errors.append("element layer roundtrip failed")
+	if again.background_regions.size() != 1 or int(again.background_regions[0].get("layer", -1)) != 2:
+		errors.append("background region layer roundtrip failed")
+	var poly := DirectorSceneModel.water_polygon(again.water_regions[0])
+	if poly.size() != 4 or DirectorSceneModel.polygon_area(poly) < 0.02:
+		errors.append("polygon water roundtrip failed")
+	var moved := poly.duplicate()
+	moved[0] = Vector2(0.58, 0.12)
+	if moved[0].is_equal_approx(poly[0]):
+		errors.append("polygon control point should be independently adjustable")
+	return errors
+
+
+func _test_index_v1_chapter_migration() -> PackedStringArray:
+	var errors: PackedStringArray = PackedStringArray()
+	var repo := _temp_repo("index_v1")
+	var a := repo.create_preset_scene("旧索引甲")
+	var b := repo.create_blank_scene("旧索引乙")
+	if a == null or b == null:
+		errors.append("index migration fixtures missing")
+		_cleanup_repo(repo)
+		return errors
+	var old_index := {
+		"schema_version": 1,
+		"active_scene_id": b.scene_id,
+		"scenes": [
+			{"id": a.scene_id, "name": a.name, "updated_at": a.updated_at, "thumbnail": ""},
+			{"id": b.scene_id, "name": b.name, "updated_at": b.updated_at, "thumbnail": ""},
+		],
+	}
+	var file := FileAccess.open(repo.index_path(), FileAccess.WRITE)
+	file.store_string(JSON.stringify(old_index))
+	file.close()
+	var migrated := repo.load_or_rebuild_index()
+	if int(migrated.get("schema_version", 0)) != 2 or migrated.get("chapters", []).size() != 1:
+		errors.append("schema-1 index did not migrate to one chapter")
+	var chapter_id := str(migrated.get("active_chapter_id", ""))
+	if chapter_id.is_empty() or repo.list_entries(chapter_id).size() != 2:
+		errors.append("legacy scenes were not assigned to migrated chapter")
+	if repo.active_scene_id() != b.scene_id:
+		errors.append("index migration should preserve active scene")
+	_cleanup_repo(repo)
 	return errors
 
 
@@ -42,8 +146,8 @@ func _test_example_roundtrip() -> PackedStringArray:
 		errors.append("example scene_id mismatch")
 	if model.water_regions.size() != 2:
 		errors.append("example should have 2 water regions")
-	if model.actors.size() != 1:
-		errors.append("example should have 1 actor")
+	if model.actors.size() != 2:
+		errors.append("example should have 2 actors")
 	if str(model.actors[0].get("character_id", "")) != "farmer_placeholder":
 		errors.append("example actor character_id")
 	var again := DirectorSceneModel.from_json_text(model.to_json_text())
@@ -364,6 +468,14 @@ func _water(id: String, rect: Rect2, dir: Vector2) -> Dictionary:
 		"flow_dir": DirectorSceneModel.vec2_to_arr(n),
 		"flow_speed": 0.22,
 		"collision_enabled": true,
+	}
+
+
+func _actor(id: String, start: Vector2, layer: int, speed: float) -> Dictionary:
+	return {
+		"id": id, "character_id": CharacterRegistry.FARMER, "display_name": id,
+		"enabled": true, "start_uv": DirectorSceneModel.vec2_to_arr(start), "layer": layer,
+		"route": {"points_uv": [DirectorSceneModel.vec2_to_arr(start + Vector2(0.2, 0))], "speed_px_per_sec": speed, "loop": false, "collision_mode": "ignore", "visible": true},
 	}
 
 

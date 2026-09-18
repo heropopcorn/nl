@@ -5,7 +5,8 @@ extends RefCounted
 ## Never writes into res://art/approved/ or codex/asset-gen/.
 
 const DEFAULT_ROOT := "user://director_desk/"
-const INDEX_SCHEMA := 1
+const INDEX_SCHEMA := 2
+const DEFAULT_CHAPTER_NAME := "第一章"
 const V1_JSON := "user://scene_layout.json"
 const V1_GROUND := "user://custom_ground.png"
 const V1_WATER := "user://water_mask.png"
@@ -45,18 +46,46 @@ func index_path() -> String:
 	return root + "index.json"
 
 
-func list_entries() -> Array[Dictionary]:
+func list_entries(chapter_id: String = "") -> Array[Dictionary]:
 	var index := load_or_rebuild_index()
 	var entries: Array[Dictionary] = []
 	var raw: Variant = index.get("scenes", [])
 	if raw is Array:
 		for item in raw:
-			if item is Dictionary:
+			if item is Dictionary and (chapter_id.is_empty() or str(item.get("chapter_id", "")) == chapter_id):
 				entries.append(item)
 	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return str(a.get("updated_at", "")) > str(b.get("updated_at", ""))
+		return int(a.get("order", 0)) < int(b.get("order", 0))
 	)
 	return entries
+
+
+func list_chapters() -> Array[Dictionary]:
+	var index := load_or_rebuild_index()
+	var result: Array[Dictionary] = []
+	for item in index.get("chapters", []):
+		if item is Dictionary:
+			result.append(item)
+	result.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a.get("order", 0)) < int(b.get("order", 0)))
+	return result
+
+
+func active_chapter_id() -> String:
+	return str(load_or_rebuild_index().get("active_chapter_id", ""))
+
+
+func set_active_chapter_id(chapter_id: String) -> void:
+	var index := load_or_rebuild_index()
+	if _chapter_exists(index, chapter_id):
+		index["active_chapter_id"] = chapter_id
+		_write_index(index)
+
+
+func chapter_for_scene(scene_id: String) -> String:
+	for item in load_or_rebuild_index().get("scenes", []):
+		if item is Dictionary and str(item.get("id", "")) == scene_id:
+			return str(item.get("chapter_id", ""))
+	return ""
 
 
 func active_scene_id() -> String:
@@ -67,6 +96,9 @@ func active_scene_id() -> String:
 func set_active_scene_id(scene_id: String) -> void:
 	var index := load_or_rebuild_index()
 	index["active_scene_id"] = scene_id
+	for item in index.get("scenes", []):
+		if item is Dictionary and str(item.get("id", "")) == scene_id:
+			index["active_chapter_id"] = str(item.get("chapter_id", index.get("active_chapter_id", "")))
 	_write_index(index)
 
 
@@ -76,7 +108,10 @@ func load_or_rebuild_index() -> Dictionary:
 	if FileAccess.file_exists(path):
 		var parsed := _read_json_dict(path)
 		if not parsed.is_empty() and parsed.get("scenes", []) is Array:
-			return parsed
+			var normalized := _normalize_index(parsed)
+			if int(parsed.get("schema_version", 1)) != INDEX_SCHEMA or not parsed.has("chapters"):
+				_write_index(normalized)
+			return normalized
 		print("director repo: index unreadable, rebuilding")
 	return rebuild_index()
 
@@ -95,19 +130,118 @@ func rebuild_index() -> Dictionary:
 					scenes.append(_index_entry_for(model))
 			entry = dir.get_next()
 		dir.list_dir_end()
-	scenes.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return str(a.get("updated_at", "")) > str(b.get("updated_at", ""))
-	)
+	scenes.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return str(a.get("updated_at", "")) < str(b.get("updated_at", "")))
+	var chapter_id := _new_chapter_id()
+	for i in range(scenes.size()):
+		scenes[i]["chapter_id"] = chapter_id
+		scenes[i]["order"] = i
 	var active := ""
 	if not scenes.is_empty():
 		active = str(scenes[0].get("id", ""))
 	var index := {
 		"schema_version": INDEX_SCHEMA,
 		"active_scene_id": active,
+		"active_chapter_id": chapter_id,
+		"chapters": [{"id": chapter_id, "name": DEFAULT_CHAPTER_NAME, "order": 0}],
 		"scenes": scenes,
 	}
 	_write_index(index)
 	return index
+
+
+func create_chapter(chapter_name: String) -> String:
+	last_error = ""
+	var trimmed := chapter_name.strip_edges()
+	if trimmed.length() < 1 or trimmed.length() > 40:
+		last_error = "章节名称须为 1–40 个字符"
+		return ""
+	var index := load_or_rebuild_index()
+	var id := _new_chapter_id()
+	index["chapters"].append({"id": id, "name": trimmed, "order": index["chapters"].size()})
+	index["active_chapter_id"] = id
+	_write_index(index)
+	return id
+
+
+func rename_chapter(chapter_id: String, chapter_name: String) -> bool:
+	var trimmed := chapter_name.strip_edges()
+	if trimmed.length() < 1 or trimmed.length() > 40:
+		last_error = "章节名称须为 1–40 个字符"
+		return false
+	var index := load_or_rebuild_index()
+	for chapter in index.get("chapters", []):
+		if chapter is Dictionary and str(chapter.get("id", "")) == chapter_id:
+			chapter["name"] = trimmed
+			return _write_index(index)
+	last_error = "找不到章节"
+	return false
+
+
+func delete_chapter(chapter_id: String) -> bool:
+	var index := load_or_rebuild_index()
+	if index.get("chapters", []).size() <= 1:
+		last_error = "至少保留一个章节"
+		return false
+	var scene_ids: Array[String] = []
+	for item in index.get("scenes", []):
+		if item is Dictionary and str(item.get("chapter_id", "")) == chapter_id:
+			scene_ids.append(str(item.get("id", "")))
+	for scene_id in scene_ids:
+		var dir_path := scene_dir(scene_id)
+		if DirAccess.dir_exists_absolute(_abs(dir_path)):
+			_remove_dir_recursive(dir_path)
+	var chapters: Array = []
+	for chapter in index.get("chapters", []):
+		if chapter is Dictionary and str(chapter.get("id", "")) != chapter_id:
+			chapters.append(chapter)
+	var scenes: Array = []
+	for item in index.get("scenes", []):
+		if item is Dictionary and str(item.get("chapter_id", "")) != chapter_id:
+			scenes.append(item)
+	index["chapters"] = chapters
+	index["scenes"] = scenes
+	_normalize_orders(index)
+	index["active_chapter_id"] = str(chapters[0].get("id", ""))
+	if str(index.get("active_scene_id", "")) in scene_ids:
+		index["active_scene_id"] = _first_scene_id(index, str(index["active_chapter_id"]))
+	return _write_index(index)
+
+
+func move_chapter(chapter_id: String, delta: int) -> bool:
+	var index := load_or_rebuild_index()
+	var chapters: Array = index.get("chapters", [])
+	var at := _find_by_id(chapters, chapter_id)
+	var target := clampi(at + delta, 0, chapters.size() - 1)
+	if at < 0 or at == target:
+		return false
+	var value: Variant = chapters[at]
+	chapters.remove_at(at)
+	chapters.insert(target, value)
+	for i in range(chapters.size()):
+		chapters[i]["order"] = i
+	index["chapters"] = chapters
+	_normalize_orders(index)
+	return _write_index(index)
+
+
+func move_scene(scene_id: String, delta: int) -> bool:
+	var index := load_or_rebuild_index()
+	var chapter_id := chapter_for_scene(scene_id)
+	var ordered: Array = []
+	for item in index.get("scenes", []):
+		if item is Dictionary and str(item.get("chapter_id", "")) == chapter_id:
+			ordered.append(item)
+	ordered.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a.get("order", 0)) < int(b.get("order", 0)))
+	var at := _find_by_id(ordered, scene_id)
+	var target := clampi(at + delta, 0, ordered.size() - 1)
+	if at < 0 or at == target:
+		return false
+	var value: Variant = ordered[at]
+	ordered.remove_at(at)
+	ordered.insert(target, value)
+	for i in range(ordered.size()):
+		ordered[i]["order"] = i
+	return _write_index(index)
 
 
 func load_scene(scene_id: String) -> DirectorSceneModel:
@@ -245,6 +379,7 @@ func delete_scene(scene_id: String) -> bool:
 	index["scenes"] = next
 	if str(index.get("active_scene_id", "")) == scene_id:
 		index["active_scene_id"] = str(next[0]["id"]) if not next.is_empty() else ""
+	_normalize_orders(index)
 	_write_index(index)
 	return true
 
@@ -390,6 +525,8 @@ func _index_entry_for(model: DirectorSceneModel) -> Dictionary:
 		"name": model.name,
 		"updated_at": model.updated_at,
 		"thumbnail": thumb,
+		"chapter_id": "",
+		"order": 0,
 	}
 
 
@@ -397,22 +534,113 @@ func _upsert_index_entry(model: DirectorSceneModel) -> void:
 	var index := load_or_rebuild_index()
 	var scenes: Array = []
 	var replaced := false
+	var target_chapter_id := str(index.get("active_chapter_id", ""))
 	for item in index.get("scenes", []):
 		if item is Dictionary and str(item.get("id", "")) == model.scene_id:
-			scenes.append(_index_entry_for(model))
+			var replacement := _index_entry_for(model)
+			replacement["chapter_id"] = str(item.get("chapter_id", index.get("active_chapter_id", "")))
+			replacement["order"] = int(item.get("order", 0))
+			scenes.append(replacement)
+			target_chapter_id = str(replacement["chapter_id"])
 			replaced = true
 		elif item is Dictionary:
 			scenes.append(item)
 	if not replaced:
-		scenes.append(_index_entry_for(model))
+		var fresh := _index_entry_for(model)
+		fresh["chapter_id"] = target_chapter_id
+		fresh["order"] = _scene_count(index, target_chapter_id)
+		scenes.append(fresh)
 	index["scenes"] = scenes
 	index["active_scene_id"] = model.scene_id
+	index["active_chapter_id"] = target_chapter_id
 	_write_index(index)
 
 
 func _write_index(index: Dictionary) -> bool:
 	index["schema_version"] = INDEX_SCHEMA
+	index = _normalize_index(index)
 	return _atomic_write_text(index_path(), JSON.stringify(index, "\t") + "\n")
+
+
+func _normalize_index(source: Dictionary) -> Dictionary:
+	var index := source.duplicate(true)
+	var chapters: Array = []
+	if index.get("chapters", []) is Array:
+		for item in index.get("chapters", []):
+			if item is Dictionary and not str(item.get("id", "")).is_empty():
+				chapters.append(item)
+	if chapters.is_empty():
+		chapters.append({"id": _new_chapter_id(), "name": DEFAULT_CHAPTER_NAME, "order": 0})
+	index["chapters"] = chapters
+	var fallback := str(chapters[0].get("id", ""))
+	var scenes: Array = []
+	if index.get("scenes", []) is Array:
+		for item in index.get("scenes", []):
+			if item is Dictionary:
+				if not _chapter_exists_in(chapters, str(item.get("chapter_id", ""))):
+					item["chapter_id"] = fallback
+				scenes.append(item)
+	index["scenes"] = scenes
+	if not _chapter_exists_in(chapters, str(index.get("active_chapter_id", ""))):
+		index["active_chapter_id"] = fallback
+	index["schema_version"] = INDEX_SCHEMA
+	_normalize_orders(index)
+	return index
+
+
+func _normalize_orders(index: Dictionary) -> void:
+	var chapters: Array = index.get("chapters", [])
+	chapters.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a.get("order", 0)) < int(b.get("order", 0)))
+	for i in range(chapters.size()):
+		chapters[i]["order"] = i
+	for chapter in chapters:
+		var cid := str(chapter.get("id", ""))
+		var own: Array = []
+		for item in index.get("scenes", []):
+			if item is Dictionary and str(item.get("chapter_id", "")) == cid:
+				own.append(item)
+		own.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a.get("order", 0)) < int(b.get("order", 0)))
+		for i in range(own.size()):
+			own[i]["order"] = i
+
+
+func _chapter_exists(index: Dictionary, chapter_id: String) -> bool:
+	return _chapter_exists_in(index.get("chapters", []), chapter_id)
+
+
+func _chapter_exists_in(chapters: Array, chapter_id: String) -> bool:
+	for chapter in chapters:
+		if chapter is Dictionary and str(chapter.get("id", "")) == chapter_id:
+			return true
+	return false
+
+
+func _new_chapter_id() -> String:
+	return DirectorSceneModel.new_hex_id("ch_", 6)
+
+
+func _find_by_id(items: Array, id: String) -> int:
+	for i in range(items.size()):
+		if items[i] is Dictionary and str(items[i].get("id", "")) == id:
+			return i
+	return -1
+
+
+func _scene_count(index: Dictionary, chapter_id: String) -> int:
+	var count := 0
+	for item in index.get("scenes", []):
+		if item is Dictionary and str(item.get("chapter_id", "")) == chapter_id:
+			count += 1
+	return count
+
+
+func _first_scene_id(index: Dictionary, chapter_id: String) -> String:
+	var best: Dictionary = {}
+	for item in index.get("scenes", []):
+		if item is Dictionary and str(item.get("chapter_id", "")) == chapter_id:
+			if best.is_empty() or int(item.get("order", 0)) < int(best.get("order", 0)):
+				best = item
+	return str(best.get("id", ""))
 
 
 func _atomic_write_text(path: String, text: String) -> bool:
