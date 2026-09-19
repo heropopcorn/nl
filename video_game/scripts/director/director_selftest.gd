@@ -12,14 +12,39 @@ func run_model_and_repo() -> PackedStringArray:
 	_collect(errors, _test_validation_edges())
 	_collect(errors, _test_repository_crud())
 	_collect(errors, _test_chapter_crud_and_order())
+	_collect(errors, _test_selected_chapter_survives_scene_save())
 	_collect(errors, _test_index_v1_chapter_migration())
 	_collect(errors, _test_v2_layers_and_polygons())
 	_collect(errors, _test_index_rebuild())
 	_collect(errors, _test_atomic_backup())
 	_collect(errors, _test_path_safety())
 	_collect(errors, _test_upload_resize())
+	_collect(errors, _test_layout_v3_assets_and_fields())
 	_collect(errors, _test_v1_migration())
 	_collect(errors, _test_corrupt_recovery())
+	return errors
+
+
+func _test_layout_v3_assets_and_fields() -> PackedStringArray:
+	var errors: PackedStringArray = PackedStringArray()
+	var root := "user://director_desk_selftest/assets_%d/" % Time.get_ticks_usec()
+	var library := DirectorAssetLibrary.new(root)
+	var image := Image.create(24, 18, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.2, 0.7, 0.4, 0.8))
+	var imported := library.import_image(image.save_png_to_buffer(), "自定义树.png", "trees")
+	if imported.is_empty() or library.list_assets("trees").size() != 1:
+		errors.append("layout v3 custom asset import failed: %s" % library.last_error)
+	elif not library.asset_exists(str(imported.get("id", ""))):
+		errors.append("layout v3 custom asset file missing")
+	var model := _valid_stub()
+	model.elements = [{"id": "element_flip", "asset_id": "tree_oak", "display_name": "镜像树", "enabled": true, "position_uv": [0.5, 0.5], "layer": 2, "scale": 0.5, "flip_h": true}]
+	model.water_regions = [{"id": "water_layer", "name": "高层水流", "enabled": true, "shape": "rect", "rect_uv": [0.1, 0.1, 0.2, 0.2], "flow_dir": [0, 1], "flow_speed": 0.2, "collision_enabled": false, "layer": 7}]
+	var again := DirectorSceneModel.from_json_text(model.to_json_text())
+	if not bool(again.elements[0].get("flip_h", false)):
+		errors.append("layout v3 element flip_h roundtrip failed")
+	if int(again.water_regions[0].get("layer", -15)) != 7:
+		errors.append("layout v3 water layer roundtrip failed")
+	_rm_rf(root)
 	return errors
 
 
@@ -54,6 +79,31 @@ func _test_chapter_crud_and_order() -> PackedStringArray:
 		errors.append("chapter delete should delete child scenes")
 	if repo.delete_chapter(first):
 		errors.append("last chapter must be protected")
+	_cleanup_repo(repo)
+	return errors
+
+
+func _test_selected_chapter_survives_scene_save() -> PackedStringArray:
+	var errors: PackedStringArray = PackedStringArray()
+	var repo := _temp_repo("selected_chapter")
+	repo.rebuild_index()
+	var open_scene := repo.create_preset_scene("第一章场景")
+	var selected_chapter := repo.create_chapter("第二章")
+	if open_scene == null or selected_chapter.is_empty():
+		errors.append("selected chapter fixtures missing")
+		_cleanup_repo(repo)
+		return errors
+	repo.set_active_chapter_id(selected_chapter)
+	open_scene.name = "第一章场景已保存"
+	if not repo.save_scene(open_scene):
+		errors.append("saving open scene failed")
+	if repo.active_chapter_id() != selected_chapter:
+		errors.append("saving open scene should preserve selected chapter")
+	var created := repo.create_blank_scene("第二章新场景", selected_chapter)
+	if created == null:
+		errors.append("creating scene in selected chapter failed")
+	elif repo.chapter_for_scene(created.scene_id) != selected_chapter:
+		errors.append("new scene should use explicitly selected chapter")
 	_cleanup_repo(repo)
 	return errors
 

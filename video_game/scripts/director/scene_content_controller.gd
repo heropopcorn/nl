@@ -29,12 +29,14 @@ const ASSETS := [
 ]
 
 var village: VillageSandbox
+var asset_library: DirectorAssetLibrary
 var _element_nodes: Dictionary = {}
 var _region_nodes: Dictionary = {}
 
 
-func setup(host: VillageSandbox) -> void:
+func setup(host: VillageSandbox, library: DirectorAssetLibrary = null) -> void:
 	village = host
+	asset_library = library
 	name = "DirectorContent"
 	y_sort_enabled = true
 
@@ -60,6 +62,24 @@ static func assets_in_category(category: String) -> Array[Dictionary]:
 
 static func asset_exists(asset_id: String) -> bool:
 	return not asset_info(asset_id).is_empty() and ResourceLoader.exists("res://art/sliced/%s.png" % asset_id)
+
+
+func has_asset(asset_id: String) -> bool:
+	return asset_exists(asset_id) or (asset_library != null and asset_library.asset_exists(asset_id))
+
+
+func asset_label_for(asset_id: String) -> String:
+	if asset_exists(asset_id):
+		return asset_label(asset_id)
+	if asset_library:
+		return str(asset_library.info(asset_id).get("name", asset_id))
+	return asset_id
+
+
+func texture_path_for(asset_id: String) -> String:
+	if asset_exists(asset_id):
+		return "res://art/sliced/%s.png" % asset_id
+	return asset_library.texture_path(asset_id) if asset_library else ""
 
 
 func rebuild(model: DirectorSceneModel) -> void:
@@ -115,10 +135,17 @@ func _spawn_element(element: Dictionary) -> void:
 	if not bool(element.get("enabled", true)):
 		return
 	var asset_id := str(element.get("asset_id", "tree_oak"))
-	var path := "res://art/sliced/%s.png" % asset_id
-	if not asset_exists(asset_id):
+	var path := texture_path_for(asset_id)
+	if path.is_empty() or not FileAccess.file_exists(path) and not ResourceLoader.exists(path):
 		return
-	var texture := load(path) as Texture2D
+	var texture: Texture2D
+	if path.begins_with("user://"):
+		var image := Image.new()
+		if image.load_png_from_buffer(FileAccess.get_file_as_bytes(path)) != OK:
+			return
+		texture = ImageTexture.create_from_image(image)
+	else:
+		texture = load(path) as Texture2D
 	var sprite := Sprite2D.new()
 	sprite.name = str(element.get("id", "element"))
 	sprite.texture = texture
@@ -128,6 +155,7 @@ func _spawn_element(element: Dictionary) -> void:
 	var item_scale := float(element.get("scale", 0.5))
 	sprite.scale = Vector2.ONE * item_scale
 	sprite.z_index = int(element.get("layer", 0))
+	sprite.flip_h = bool(element.get("flip_h", false))
 	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	add_child(sprite)
 	_element_nodes[str(element.get("id", ""))] = sprite

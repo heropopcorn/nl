@@ -44,7 +44,8 @@
         0.948683
       ],
       "flow_speed": 0.22,
-      "collision_enabled": true
+      "collision_enabled": true,
+      "layer": -15
     },
     {
       "id": "water_main_02",
@@ -62,7 +63,8 @@
         0.447214
       ],
       "flow_speed": 0.3,
-      "collision_enabled": false
+      "collision_enabled": false,
+      "layer": -15
     }
   ],
   "actors": [
@@ -121,7 +123,8 @@
       "enabled": true,
       "position_uv": [0.68, 0.54],
       "layer": 2,
-      "scale": 0.5
+      "scale": 0.5,
+      "flip_h": false
     }
   ],
   "background_regions": [
