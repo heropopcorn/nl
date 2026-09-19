@@ -33,3 +33,13 @@ tools/audio-gen/.env
 video_game/export/
 
 tools/audio-gen/output/
+
+# Codex run artifacts (keep jobs/docs; drop runtime logs)
+**/codex.pid
+**/nohup.out
+**/status.txt
+**/started_at.txt
+**/ended_at.txt
+**/exit_code.txt
+**/codex-stderr.txt
+**/codex-stdout.txt
