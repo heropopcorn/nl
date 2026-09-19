@@ -37,11 +37,13 @@ func _test_layout_v3_assets_and_fields() -> PackedStringArray:
 	elif not library.asset_exists(str(imported.get("id", ""))):
 		errors.append("layout v3 custom asset file missing")
 	var model := _valid_stub()
-	model.elements = [{"id": "element_flip", "asset_id": "tree_oak", "display_name": "镜像树", "enabled": true, "position_uv": [0.5, 0.5], "layer": 2, "scale": 0.5, "flip_h": true}]
+	model.elements = [{"id": "element_flip", "asset_id": "tree_oak", "display_name": "镜像树", "enabled": true, "position_uv": [0.5, 0.5], "layer": 2, "scale": 0.5, "rotation_degrees": 32.5, "flip_h": true}]
 	model.water_regions = [{"id": "water_layer", "name": "高层水流", "enabled": true, "shape": "rect", "rect_uv": [0.1, 0.1, 0.2, 0.2], "flow_dir": [0, 1], "flow_speed": 0.2, "collision_enabled": false, "layer": 7}]
 	var again := DirectorSceneModel.from_json_text(model.to_json_text())
 	if not bool(again.elements[0].get("flip_h", false)):
 		errors.append("layout v3 element flip_h roundtrip failed")
+	if not is_equal_approx(float(again.elements[0].get("rotation_degrees", 0.0)), 32.5):
+		errors.append("layout v3 element rotation roundtrip failed")
 	if int(again.water_regions[0].get("layer", -15)) != 7:
 		errors.append("layout v3 water layer roundtrip failed")
 	_rm_rf(root)

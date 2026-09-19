@@ -121,6 +121,22 @@ func element_world_position(id: String) -> Vector2:
 	return sprite.global_position if sprite else Vector2.ZERO
 
 
+func element_world_corners(id: String) -> PackedVector2Array:
+	var result := PackedVector2Array()
+	var sprite: Sprite2D = _element_nodes.get(id)
+	if sprite == null:
+		return result
+	var rect := sprite.get_rect()
+	for point in [rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)]:
+		result.append(sprite.to_global(point))
+	return result
+
+
+func element_rotation_degrees(id: String) -> float:
+	var sprite: Sprite2D = _element_nodes.get(id)
+	return sprite.rotation_degrees if sprite else 0.0
+
+
 func element_z_index(id: String) -> int:
 	var sprite: Sprite2D = _element_nodes.get(id)
 	return sprite.z_index if sprite else -999999
@@ -154,6 +170,7 @@ func _spawn_element(element: Dictionary) -> void:
 	sprite.position = village.uv_to_world(DirectorSceneModel._vec2(element.get("position_uv", [0.5, 0.5]), Vector2(0.5, 0.5)))
 	var item_scale := float(element.get("scale", 0.5))
 	sprite.scale = Vector2.ONE * item_scale
+	sprite.rotation_degrees = float(element.get("rotation_degrees", 0.0))
 	sprite.z_index = int(element.get("layer", 0))
 	sprite.flip_h = bool(element.get("flip_h", false))
 	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR

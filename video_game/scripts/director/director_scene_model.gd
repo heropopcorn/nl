@@ -50,7 +50,7 @@ const KNOWN_ACTOR_KEYS := [
 	"id", "character_id", "display_name", "enabled", "start_uv", "layer", "route",
 ]
 const KNOWN_ROUTE_KEYS := ["points_uv", "speed_px_per_sec", "loop", "collision_mode", "visible"]
-const KNOWN_ELEMENT_KEYS := ["id", "asset_id", "display_name", "enabled", "position_uv", "layer", "scale", "flip_h"]
+const KNOWN_ELEMENT_KEYS := ["id", "asset_id", "display_name", "enabled", "position_uv", "layer", "scale", "rotation_degrees", "flip_h"]
 const KNOWN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "layer"]
 const KNOWN_WEATHER_KEYS := ["enabled", "type", "intensity"]
 
@@ -695,6 +695,7 @@ func _parse_element(data: Dictionary) -> Dictionary:
 	out["position_uv"] = vec2_to_arr(clamp_uv(_vec2(data.get("position_uv", [0.5, 0.5]), Vector2(0.5, 0.5))))
 	out["layer"] = _as_int(data.get("layer", 0), 0)
 	out["scale"] = clampf(float(data.get("scale", 0.5)), 0.05, 4.0)
+	out["rotation_degrees"] = wrapf(float(data.get("rotation_degrees", 0.0)) + 180.0, 0.0, 360.0) - 180.0
 	out["flip_h"] = bool(data.get("flip_h", false))
 	return out
 
@@ -788,6 +789,7 @@ func _export_element(element: Dictionary) -> Dictionary:
 		"display_name": str(element.get("display_name", "元素")), "enabled": bool(element.get("enabled", true)),
 		"position_uv": element.get("position_uv", [0.5, 0.5]), "layer": _as_int(element.get("layer", 0), 0),
 		"scale": snap6(float(element.get("scale", 0.5))),
+		"rotation_degrees": snap6(float(element.get("rotation_degrees", 0.0))),
 		"flip_h": bool(element.get("flip_h", false)),
 	})
 

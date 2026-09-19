@@ -3,15 +3,15 @@ extends Control
 
 ## Director Desk Layout V3: hierarchy/resources, inspector, project browser and canvas tools.
 
-enum Mode { SELECT, BOX_WATER, LASSO_WATER, LASSO_REGION, EDIT_ROUTE, PREVIEW }
-enum DragKind { NONE, WATER_MOVE, WATER_RESIZE, WATER_DIR, WATER_POINT, ROUTE_POINT, ELEMENT_MOVE, BOX }
+enum Mode { SELECT, BOX_WATER, LASSO_WATER, LASSO_REGION, EDIT_ROUTE, SCALE, ROTATE, PREVIEW }
+enum DragKind { NONE, WATER_MOVE, WATER_RESIZE, WATER_DIR, WATER_POINT, ROUTE_POINT, ELEMENT_MOVE, ELEMENT_SCALE, ELEMENT_ROTATE, BOX }
 
 const HANDLE := 8.0
 const TOP_H := 44.0
 const BOTTOM_H := 184.0
 const LEFT_W := 250.0
 const RIGHT_W := 300.0
-const TOOL_W := 58.0
+const TOOL_W := 82.0
 const NARROW := 900.0
 const HELP_TEXT := """导演台 Layout V3
 
@@ -19,7 +19,9 @@ const HELP_TEXT := """导演台 Layout V3
 
 元素：从背景、树木、角色和房屋分类添加；自定义页可上传图片。整数层级越高越靠前；同层按脚底 Y 排序。
 
-底图区域与水域可用套索逐点圈选，双击、回点或 Enter 闭合。矩形水域还可拖四角缩放。水面有方向流纹，每块可设流向、流速和碰撞。
+“矩形水域”拖出规则水面；“套索水域”逐点创建不规则水面；“底图裁片”圈出可独立设置层级的背景区域。双击、回点或 Enter 闭合套索，创建后工具会保持激活，可按 Esc 回到移动。
+
+移动、缩放、旋转用于图片元素。先选工具，再在画布上按住元素拖动；缩放按离中心的距离改变大小，旋转绕元素脚底锚点改变角度。右侧属性也可精确输入。
 
 角色：可添加多人；必须先点选角色，才显示和编辑其路线。每人可独立设置层级、速度、路线显隐与循环，播放时同时行走。
 
@@ -74,6 +76,11 @@ var _resource_scope := "default"
 var _asset_drawer_open := true
 var _placing_asset := false
 var _play_had_actor := false
+var _transform_origin := Vector2.ZERO
+var _transform_start_distance := 1.0
+var _transform_start_scale := 1.0
+var _transform_start_pointer_angle := 0.0
+var _transform_start_rotation := 0.0
 
 var _save_timer: Timer
 var _picker: Node
@@ -248,6 +255,23 @@ func render_gizmos(canvas: Node2D) -> void:
 	if not selected_element_id.is_empty():
 		var marker := content.element_world_position(selected_element_id)
 		canvas.draw_circle(marker, handle * 1.15, Color(1.0, 0.55, 0.2, 0.9), false, 2.0 / zoom)
+		var corners := content.element_world_corners(selected_element_id)
+		if corners.size() == 4:
+			var closed := corners.duplicate()
+			closed.append(corners[0])
+			canvas.draw_polyline(closed, Color(1.0, 0.62, 0.22, 0.92), 2.0 / zoom, true)
+			if mode == Mode.SCALE:
+				for point in corners:
+					canvas.draw_rect(Rect2(point - Vector2.ONE * handle * 0.55, Vector2.ONE * handle * 1.1), Color(1.0, 0.92, 0.72, 1.0), true)
+			elif mode == Mode.ROTATE:
+				var radius := 0.0
+				for point in corners:
+					radius = maxf(radius, marker.distance_to(point))
+				radius += handle * 2.0
+				canvas.draw_arc(marker, radius, 0.0, TAU, 48, Color(1.0, 0.76, 0.3, 0.9), 2.0 / zoom, true)
+				var tip := marker + Vector2.RIGHT.rotated(deg_to_rad(content.element_rotation_degrees(selected_element_id))) * radius
+				canvas.draw_line(marker, tip, Color(1.0, 0.76, 0.3, 0.9), 2.0 / zoom, true)
+				canvas.draw_circle(tip, handle * 0.75, Color(1.0, 0.92, 0.62, 1.0))
 	var actor := actors.actor_by_id(model, selected_actor_id)
 	if not actor.is_empty() and bool(actor.get("route", {}).get("visible", true)):
 		var start := village.uv_to_world(DirectorSceneModel._vec2(actor.get("start_uv", [0.42, 0.42]), DirectorSceneModel.DEFAULT_START_UV))
@@ -288,6 +312,12 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("layout v3 regions missing")
 	elif _hierarchy_box.get_child_count() < 3:
 		errors.append("layout v3 hierarchy should list scene elements")
+	if not _mode_btns.has(Mode.SCALE) or not _mode_btns.has(Mode.ROTATE):
+		errors.append("scale/rotate canvas modes missing")
+	elif (_mode_btns[Mode.SCALE] as Button).disabled or (_mode_btns[Mode.ROTATE] as Button).disabled:
+		errors.append("scale/rotate canvas modes should be enabled with an open scene")
+	if (_mode_btns[Mode.LASSO_WATER] as Button).text != "套索水域" or (_mode_btns[Mode.LASSO_REGION] as Button).text != "底图裁片":
+		errors.append("water lasso and background region labels must be explicit")
 	_select_hierarchy("background", "")
 	if selected_kind != "background" or _tab_pages[0].visible == false:
 		errors.append("layout v3 background hierarchy selection failed")
@@ -385,7 +415,7 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("character_id not saved in model")
 	# V2 layer rendering: higher integer wins; same-layer world positions retain Y order.
 	_begin_cmd()
-	model.elements.append({"id": "element_low", "asset_id": "tree_oak", "display_name": "树", "enabled": true, "position_uv": [0.35, 0.35], "layer": 2, "scale": 0.4})
+	model.elements.append({"id": "element_low", "asset_id": "tree_oak", "display_name": "树", "enabled": true, "position_uv": [0.35, 0.35], "layer": 2, "scale": 0.4, "rotation_degrees": 27.0})
 	model.elements.append({"id": "element_high", "asset_id": "house_market", "display_name": "房屋", "enabled": true, "position_uv": [0.35, 0.65], "layer": 5, "scale": 0.4})
 	model.elements.append({"id": "element_same_layer", "asset_id": "tree_pine", "display_name": "同层松树", "enabled": true, "position_uv": [0.45, 0.75], "layer": 2, "scale": 0.4})
 	model.background_regions.append({"id": "region_test", "name": "平台", "enabled": true, "points_uv": [[0.55, 0.55], [0.72, 0.55], [0.68, 0.70]], "layer": 4})
@@ -393,6 +423,38 @@ func run_runtime_selftest() -> PackedStringArray:
 	_sync_world()
 	if content.element_z_index("element_low") != 2 or content.element_z_index("element_high") != 5:
 		errors.append("element integer layer not applied")
+	if not is_equal_approx(content.element_rotation_degrees("element_low"), 27.0):
+		errors.append("element rotation not applied")
+	selected_element_id = "element_low"
+	selected_kind = "element"
+	var transform_corners := content.element_world_corners("element_low")
+	if transform_corners.size() == 4:
+		var inside := (transform_corners[0] + transform_corners[1] + transform_corners[2] + transform_corners[3]) * 0.25
+		_set_mode(Mode.SCALE)
+		_begin_element_transform(inside)
+		var pivot := content.element_world_position("element_low")
+		var scale_before := float(_element_by_id("element_low").get("scale", 0.0))
+		_drag_scale_element(pivot + (inside - pivot) * 1.5)
+		if float(_element_by_id("element_low").get("scale", 0.0)) <= scale_before:
+			errors.append("canvas scale drag did not enlarge element")
+		_end_cmd()
+		_drag = DragKind.NONE
+		_sync_world()
+		transform_corners = content.element_world_corners("element_low")
+		inside = (transform_corners[0] + transform_corners[1] + transform_corners[2] + transform_corners[3]) * 0.25
+		_set_mode(Mode.ROTATE)
+		_begin_element_transform(inside)
+		pivot = content.element_world_position("element_low")
+		var rotation_before := float(_element_by_id("element_low").get("rotation_degrees", 0.0))
+		_drag_rotate_element(pivot + (inside - pivot).rotated(PI * 0.25))
+		if absf(float(_element_by_id("element_low").get("rotation_degrees", 0.0)) - rotation_before) < 20.0:
+			errors.append("canvas rotation drag did not rotate element")
+		_end_cmd()
+		_drag = DragKind.NONE
+		_sync_world()
+		_set_mode(Mode.SELECT)
+	else:
+		errors.append("element transform gizmo corners missing")
 	if content.element_z_index("element_same_layer") != content.element_z_index("element_low") \
 			or content.element_world_position("element_same_layer").y <= content.element_world_position("element_low").y \
 			or not village.world.y_sort_enabled or not content.y_sort_enabled:
@@ -564,7 +626,7 @@ func _fill_top() -> void:
 	file_menu.get_popup().add_item("新建场景", 1)
 	file_menu.get_popup().add_separator()
 	file_menu.get_popup().add_item("新建角色", 2)
-	file_menu.get_popup().add_item("新建水流区域", 3)
+	file_menu.get_popup().add_item("新建矩形水域", 3)
 	file_menu.get_popup().add_item("新建底图裁片区域", 4)
 	file_menu.get_popup().add_item("上传自定义资源", 5)
 	file_menu.get_popup().add_separator()
@@ -607,8 +669,8 @@ func _fill_left() -> void:
 	var hierarchy_add := MenuButton.new()
 	hierarchy_add.text = "+"
 	hierarchy_add.get_popup().add_item("角色", 0)
-	hierarchy_add.get_popup().add_item("矩形水流", 1)
-	hierarchy_add.get_popup().add_item("多边形水流", 2)
+	hierarchy_add.get_popup().add_item("矩形水域", 1)
+	hierarchy_add.get_popup().add_item("套索水域", 2)
 	hierarchy_add.get_popup().add_item("底图裁片区域", 3)
 	hierarchy_add.get_popup().id_pressed.connect(_on_hierarchy_add)
 	hierarchy_header.add_child(hierarchy_add)
@@ -797,17 +859,19 @@ func _fill_tools() -> void:
 	_tools.add_child(col)
 	col.add_child(_label("工具", 13, true))
 	_mode_btns[Mode.SELECT] = _btn("移动", func() -> void: _set_mode(Mode.SELECT), 38)
-	_mode_btns[Mode.BOX_WATER] = _btn("水域", func() -> void: _set_mode(Mode.BOX_WATER), 38)
-	_mode_btns[Mode.LASSO_WATER] = _btn("套索", func() -> void: _set_mode(Mode.LASSO_WATER), 38)
-	_mode_btns[Mode.LASSO_REGION] = _btn("裁片", func() -> void: _set_mode(Mode.LASSO_REGION), 38)
+	_mode_btns[Mode.SCALE] = _btn("缩放", func() -> void: _set_mode(Mode.SCALE), 38)
+	_mode_btns[Mode.ROTATE] = _btn("旋转", func() -> void: _set_mode(Mode.ROTATE), 38)
+	_mode_btns[Mode.BOX_WATER] = _btn("矩形水域", func() -> void: _set_mode(Mode.BOX_WATER), 38)
+	_mode_btns[Mode.LASSO_WATER] = _btn("套索水域", func() -> void: _set_mode(Mode.LASSO_WATER), 38)
+	_mode_btns[Mode.LASSO_REGION] = _btn("底图裁片", func() -> void: _set_mode(Mode.LASSO_REGION), 38)
 	_mode_btns[Mode.EDIT_ROUTE] = _btn("路线", func() -> void: _set_mode(Mode.EDIT_ROUTE), 38)
+	(_mode_btns[Mode.SCALE] as Button).tooltip_text = "拖动图片元素，按离脚底锚点的距离缩放"
+	(_mode_btns[Mode.ROTATE] as Button).tooltip_text = "拖动图片元素，绕脚底锚点旋转"
+	(_mode_btns[Mode.BOX_WATER] as Button).tooltip_text = "拖出矩形水域"
+	(_mode_btns[Mode.LASSO_WATER] as Button).tooltip_text = "逐点圈出不规则水域"
+	(_mode_btns[Mode.LASSO_REGION] as Button).tooltip_text = "逐点圈出可单独设置层级的背景区域，不会创建水域"
 	for child in _mode_btns.values():
 		col.add_child(child)
-	col.add_child(_btn("缩放", func() -> void: _set_status("请在属性面板调整元素缩放。"), 38))
-	var rotate := _btn("旋转", func() -> void: pass, 38)
-	rotate.disabled = true
-	rotate.tooltip_text = "后续开放"
-	col.add_child(rotate)
 	col.add_child(_btn("镜像", _toggle_selected_flip, 38))
 
 
@@ -1159,6 +1223,10 @@ func _on_left_mouse(event: InputEventMouseButton) -> void:
 			_place_asset_at(_asset_choice, village.world_to_uv(world))
 			get_viewport().set_input_as_handled()
 			return
+		if mode == Mode.SCALE or mode == Mode.ROTATE:
+			_begin_element_transform(world)
+			get_viewport().set_input_as_handled()
+			return
 		if mode == Mode.BOX_WATER:
 			if _drag == DragKind.BOX:
 				_box_b = world
@@ -1216,6 +1284,10 @@ func _on_mouse_move(_event: InputEventMouseMotion) -> void:
 		_drag_route_point(world)
 	elif _drag == DragKind.ELEMENT_MOVE:
 		_drag_move_element(world)
+	elif _drag == DragKind.ELEMENT_SCALE:
+		_drag_scale_element(world)
+	elif _drag == DragKind.ELEMENT_ROTATE:
+		_drag_rotate_element(world)
 
 
 func _click_select(world: Vector2) -> void:
@@ -1417,8 +1489,13 @@ func _finish_lasso() -> void:
 	_sync_world()
 	_refresh_inspector()
 	_refresh_hierarchy()
-	_set_mode(Mode.SELECT)
-	_set_status("已创建圈选区域。" if not model.has_water_overlap() else "水域不能重叠")
+	_refresh_mode_buttons()
+	if model.has_water_overlap():
+		_set_status("水域不能重叠")
+	elif mode == Mode.LASSO_WATER:
+		_set_status("已创建套索水域；工具保持激活，可继续创建，按 Esc 返回移动。")
+	else:
+		_set_status("已创建底图裁片；工具保持激活，可继续创建，按 Esc 返回移动。")
 
 
 func _apply_loaded_model(loaded: DirectorSceneModel) -> void:
@@ -1746,16 +1823,37 @@ func _fill_scene_tab() -> void:
 			_begin_cmd(); element["layer"] = int(value); _end_cmd(); _sync_world()
 		)
 		inner.add_child(element_layer)
-		inner.add_child(_label("缩放", 12, false))
+		inner.add_child(_label("缩放倍率（也可用左侧缩放工具）", 12, false))
 		var element_scale := HSlider.new()
-		element_scale.min_value = 0.1
-		element_scale.max_value = 2.0
+		element_scale.min_value = 0.05
+		element_scale.max_value = 4.0
 		element_scale.step = 0.05
 		element_scale.value = float(element.get("scale", 0.5))
+		element_scale.tooltip_text = "%.2f 倍" % element_scale.value
 		element_scale.drag_started.connect(_begin_cmd)
-		element_scale.value_changed.connect(func(value: float) -> void: element["scale"] = value; content.rebuild(model))
+		element_scale.value_changed.connect(func(value: float) -> void:
+			if _loading: return
+			element["scale"] = value
+			element_scale.tooltip_text = "%.2f 倍" % value
+			content.rebuild(model)
+		)
 		element_scale.drag_ended.connect(func(_changed: bool) -> void: _end_cmd())
 		inner.add_child(element_scale)
+		inner.add_child(_label("旋转角度（也可用左侧旋转工具）", 12, false))
+		var element_rotation := SpinBox.new()
+		element_rotation.min_value = -180.0
+		element_rotation.max_value = 180.0
+		element_rotation.step = 1.0
+		element_rotation.suffix = "°"
+		element_rotation.value = float(element.get("rotation_degrees", 0.0))
+		element_rotation.value_changed.connect(func(value: float) -> void:
+			if _loading: return
+			_begin_cmd()
+			element["rotation_degrees"] = value
+			_end_cmd()
+			content.rebuild(model)
+		)
+		inner.add_child(element_rotation)
 		inner.add_child(_checkbox("水平镜像", bool(element.get("flip_h", false)), func(value: bool) -> void:
 			if _loading: return
 			_begin_cmd(); element["flip_h"] = value; _end_cmd(); _sync_world()
@@ -2068,6 +2166,10 @@ func _set_mode(next: Mode) -> void:
 			_set_status("圈底图层：逐点勾画要抬高/压低的底图区域。")
 		Mode.EDIT_ROUTE:
 			_set_status("编辑路线：左键加点，Backspace 删末点。")
+		Mode.SCALE:
+			_set_status("缩放：在画布按住图片元素，向外或向内拖动。")
+		Mode.ROTATE:
+			_set_status("旋转：在画布按住图片元素并绕脚底锚点拖动；Shift 吸附 15°。")
 		Mode.PREVIEW:
 			_set_status("预览中：编辑已锁定。Space 播放/暂停。")
 
@@ -2590,6 +2692,7 @@ func _place_asset_at(asset_id: String, uv: Vector2) -> void:
 		"position_uv": DirectorSceneModel.vec2_to_arr(uv.clamp(Vector2.ZERO, Vector2.ONE)),
 		"layer": int(asset.get("default_layer", 0)),
 		"scale": float(asset.get("default_scale", 0.5 if not is_custom else 1.0)),
+		"rotation_degrees": 0.0,
 		"flip_h": false,
 	}
 	if is_custom:
@@ -2739,6 +2842,55 @@ func _drag_move_element(world: Vector2) -> void:
 	content.rebuild(model)
 
 
+func _begin_element_transform(world: Vector2) -> void:
+	var hit_id := content.hit_element(world)
+	if hit_id.is_empty():
+		_set_status("请在图片元素上按住并拖动；也可先从元素列表选择。")
+		return
+	selected_kind = "element"
+	selected_element_id = hit_id
+	selected_actor_id = ""
+	selected_water_id = ""
+	selected_region_id = ""
+	_select_tab(0)
+	_refresh_hierarchy()
+	_refresh_inspector()
+	var element := _element_by_id(selected_element_id)
+	if element.is_empty():
+		_set_status("请先在画布或元素列表选择一个图片元素。")
+		return
+	_transform_origin = content.element_world_position(selected_element_id)
+	_transform_start_distance = maxf(world.distance_to(_transform_origin), 8.0)
+	_transform_start_scale = float(element.get("scale", 0.5))
+	_transform_start_pointer_angle = (world - _transform_origin).angle()
+	_transform_start_rotation = float(element.get("rotation_degrees", 0.0))
+	_begin_cmd()
+	_drag = DragKind.ELEMENT_SCALE if mode == Mode.SCALE else DragKind.ELEMENT_ROTATE
+	_update_catcher()
+	_set_status("向外/向内拖动调整缩放。" if mode == Mode.SCALE else "绕脚底锚点拖动调整旋转。")
+
+
+func _drag_scale_element(world: Vector2) -> void:
+	var element := _element_by_id(selected_element_id)
+	if element.is_empty():
+		return
+	var ratio := world.distance_to(_transform_origin) / maxf(_transform_start_distance, 0.001)
+	element["scale"] = clampf(_transform_start_scale * ratio, 0.05, 4.0)
+	content.rebuild(model)
+
+
+func _drag_rotate_element(world: Vector2) -> void:
+	var element := _element_by_id(selected_element_id)
+	if element.is_empty() or world.distance_to(_transform_origin) < 2.0:
+		return
+	var delta := rad_to_deg((world - _transform_origin).angle() - _transform_start_pointer_angle)
+	var degrees := _transform_start_rotation + delta
+	if Input.is_key_pressed(KEY_SHIFT):
+		degrees = snappedf(degrees, 15.0)
+	element["rotation_degrees"] = wrapf(degrees + 180.0, 0.0, 360.0) - 180.0
+	content.rebuild(model)
+
+
 func _drag_route_point(world: Vector2) -> void:
 	var actor := actors.actor_by_id(model, selected_actor_id)
 	if actor.is_empty():
@@ -2877,7 +3029,7 @@ func _screen_mouse() -> Vector2:
 func _update_catcher() -> void:
 	if _canvas_catch == null:
 		return
-	var grab := mode == Mode.BOX_WATER or mode == Mode.LASSO_WATER or mode == Mode.LASSO_REGION or mode == Mode.EDIT_ROUTE or _drag != DragKind.NONE
+	var grab := mode == Mode.BOX_WATER or mode == Mode.LASSO_WATER or mode == Mode.LASSO_REGION or mode == Mode.EDIT_ROUTE or mode == Mode.SCALE or mode == Mode.ROTATE or _drag != DragKind.NONE
 	_canvas_catch.mouse_filter = Control.MOUSE_FILTER_STOP if grab else Control.MOUSE_FILTER_PASS
 
 

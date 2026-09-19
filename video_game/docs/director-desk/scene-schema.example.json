@@ -124,6 +124,7 @@
       "position_uv": [0.68, 0.54],
       "layer": 2,
       "scale": 0.5,
+      "rotation_degrees": 0.0,
       "flip_h": false
     }
   ],
