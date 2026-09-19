@@ -272,7 +272,7 @@ func load_scene(scene_id: String) -> DirectorSceneModel:
 	return null
 
 
-func save_scene(model: DirectorSceneModel, background_image: Image = null, thumbnail_image: Image = null) -> bool:
+func save_scene(model: DirectorSceneModel, background_image: Image = null, thumbnail_image: Image = null, chapter_id: String = "") -> bool:
 	last_error = ""
 	if model == null:
 		last_error = "无法解析场景文件"
@@ -310,21 +310,21 @@ func save_scene(model: DirectorSceneModel, background_image: Image = null, thumb
 	if not _atomic_write_text(json_path, model.to_json_text()):
 		last_error = "保存失败"
 		return false
-	_upsert_index_entry(model)
+	_upsert_index_entry(model, chapter_id)
 	return true
 
 
-func create_preset_scene(p_name: String) -> DirectorSceneModel:
+func create_preset_scene(p_name: String, chapter_id: String = "") -> DirectorSceneModel:
 	var bg := {
 		"source": "preset",
 		"preset_id": DirectorSceneModel.PRESET_VILLAGE,
 		"file": null,
 		"pixel_size": [DirectorSceneModel.PRESET_PIXEL.x, DirectorSceneModel.PRESET_PIXEL.y],
 	}
-	return _create_with_background(p_name, bg, null)
+	return _create_with_background(p_name, bg, null, chapter_id)
 
 
-func create_blank_scene(p_name: String) -> DirectorSceneModel:
+func create_blank_scene(p_name: String, chapter_id: String = "") -> DirectorSceneModel:
 	var image := DirectorImages.make_blank(DirectorSceneModel.BLANK_PIXEL, DirectorSceneModel.BLANK_FILL)
 	var bg := {
 		"source": "blank",
@@ -333,10 +333,10 @@ func create_blank_scene(p_name: String) -> DirectorSceneModel:
 		"fill_color": DirectorSceneModel.color_to_arr(DirectorSceneModel.BLANK_FILL),
 		"pixel_size": [image.get_width(), image.get_height()],
 	}
-	return _create_with_background(p_name, bg, image)
+	return _create_with_background(p_name, bg, image, chapter_id)
 
 
-func create_uploaded_scene(p_name: String, bytes: PackedByteArray, original_name: String) -> DirectorSceneModel:
+func create_uploaded_scene(p_name: String, bytes: PackedByteArray, original_name: String, chapter_id: String = "") -> DirectorSceneModel:
 	last_error = ""
 	last_warning = ""
 	var decoded := DirectorImages.decode_upload(bytes)
@@ -353,7 +353,7 @@ func create_uploaded_scene(p_name: String, bytes: PackedByteArray, original_name
 		"pixel_size": [image.get_width(), image.get_height()],
 		"sha256": DirectorImages.sha256_bytes(DirectorImages.png_bytes(image)),
 	}
-	return _create_with_background(p_name, bg, image)
+	return _create_with_background(p_name, bg, image, chapter_id)
 
 
 func rename_scene(scene_id: String, new_name: String) -> bool:
@@ -492,7 +492,7 @@ func ensure_example_if_empty() -> DirectorSceneModel:
 	return create_preset_scene(EXAMPLE_NAME)
 
 
-func _create_with_background(p_name: String, background: Dictionary, image: Image) -> DirectorSceneModel:
+func _create_with_background(p_name: String, background: Dictionary, image: Image, chapter_id: String = "") -> DirectorSceneModel:
 	last_error = ""
 	var trimmed := p_name.strip_edges()
 	if trimmed.length() < DirectorSceneModel.NAME_MIN or trimmed.length() > DirectorSceneModel.NAME_MAX:
@@ -502,7 +502,7 @@ func _create_with_background(p_name: String, background: Dictionary, image: Imag
 	while DirAccess.dir_exists_absolute(_abs(scene_dir(scene_id))):
 		scene_id = DirectorSceneModel.new_scene_id()
 	var model := DirectorSceneModel.make_new(scene_id, trimmed, background)
-	if not save_scene(model, image, image):
+	if not save_scene(model, image, image, chapter_id):
 		_remove_dir_recursive(scene_dir(scene_id))
 		return null
 	set_active_scene_id(model.scene_id)
@@ -530,18 +530,19 @@ func _index_entry_for(model: DirectorSceneModel) -> Dictionary:
 	}
 
 
-func _upsert_index_entry(model: DirectorSceneModel) -> void:
+func _upsert_index_entry(model: DirectorSceneModel, chapter_id: String = "") -> void:
 	var index := load_or_rebuild_index()
 	var scenes: Array = []
 	var replaced := false
 	var target_chapter_id := str(index.get("active_chapter_id", ""))
+	if not chapter_id.is_empty() and _chapter_exists(index, chapter_id):
+		target_chapter_id = chapter_id
 	for item in index.get("scenes", []):
 		if item is Dictionary and str(item.get("id", "")) == model.scene_id:
 			var replacement := _index_entry_for(model)
 			replacement["chapter_id"] = str(item.get("chapter_id", index.get("active_chapter_id", "")))
 			replacement["order"] = int(item.get("order", 0))
 			scenes.append(replacement)
-			target_chapter_id = str(replacement["chapter_id"])
 			replaced = true
 		elif item is Dictionary:
 			scenes.append(item)
@@ -552,7 +553,8 @@ func _upsert_index_entry(model: DirectorSceneModel) -> void:
 		scenes.append(fresh)
 	index["scenes"] = scenes
 	index["active_scene_id"] = model.scene_id
-	index["active_chapter_id"] = target_chapter_id
+	if not replaced:
+		index["active_chapter_id"] = target_chapter_id
 	_write_index(index)
 
 

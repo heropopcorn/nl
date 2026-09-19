@@ -12,6 +12,7 @@ func run_model_and_repo() -> PackedStringArray:
 	_collect(errors, _test_validation_edges())
 	_collect(errors, _test_repository_crud())
 	_collect(errors, _test_chapter_crud_and_order())
+	_collect(errors, _test_selected_chapter_survives_scene_save())
 	_collect(errors, _test_index_v1_chapter_migration())
 	_collect(errors, _test_v2_layers_and_polygons())
 	_collect(errors, _test_index_rebuild())
@@ -54,6 +55,31 @@ func _test_chapter_crud_and_order() -> PackedStringArray:
 		errors.append("chapter delete should delete child scenes")
 	if repo.delete_chapter(first):
 		errors.append("last chapter must be protected")
+	_cleanup_repo(repo)
+	return errors
+
+
+func _test_selected_chapter_survives_scene_save() -> PackedStringArray:
+	var errors: PackedStringArray = PackedStringArray()
+	var repo := _temp_repo("selected_chapter")
+	repo.rebuild_index()
+	var open_scene := repo.create_preset_scene("第一章场景")
+	var selected_chapter := repo.create_chapter("第二章")
+	if open_scene == null or selected_chapter.is_empty():
+		errors.append("selected chapter fixtures missing")
+		_cleanup_repo(repo)
+		return errors
+	repo.set_active_chapter_id(selected_chapter)
+	open_scene.name = "第一章场景已保存"
+	if not repo.save_scene(open_scene):
+		errors.append("saving open scene failed")
+	if repo.active_chapter_id() != selected_chapter:
+		errors.append("saving open scene should preserve selected chapter")
+	var created := repo.create_blank_scene("第二章新场景", selected_chapter)
+	if created == null:
+		errors.append("creating scene in selected chapter failed")
+	elif repo.chapter_for_scene(created.scene_id) != selected_chapter:
+		errors.append("new scene should use explicitly selected chapter")
 	_cleanup_repo(repo)
 	return errors
 

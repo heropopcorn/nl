@@ -2004,18 +2004,21 @@ func _confirm_delete_chapter() -> void:
 func _confirm_new_scene() -> void:
 	if repo == null:
 		return
+	if selected_chapter_id.is_empty():
+		selected_chapter_id = repo.active_chapter_id()
+	var target_chapter_id := selected_chapter_id
 	_flush_save()
 	var scene: DirectorSceneModel = null
 	match _new_source:
 		"blank":
-			scene = repo.create_blank_scene(_new_name.text)
+			scene = repo.create_blank_scene(_new_name.text, target_chapter_id)
 		"uploaded":
 			if _pending_bytes.is_empty():
 				_set_status("请先选择图片")
 				return
-			scene = repo.create_uploaded_scene(_new_name.text, _pending_bytes, _pending_filename)
+			scene = repo.create_uploaded_scene(_new_name.text, _pending_bytes, _pending_filename, target_chapter_id)
 		_:
-			scene = repo.create_preset_scene(_new_name.text)
+			scene = repo.create_preset_scene(_new_name.text, target_chapter_id)
 	if scene == null:
 		_set_status(repo.last_error if not repo.last_error.is_empty() else "无法创建场景")
 		return
