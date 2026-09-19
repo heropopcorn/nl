@@ -15,7 +15,7 @@ var director_time: float = 0.0
 func setup(host: VillageSandbox) -> void:
 	village = host
 	name = "WaterRegions"
-	z_index = -15
+	z_index = 0
 	_shader = load("res://shaders/water_flow.gdshader") as Shader
 	var image := Image.create(64, 64, false, Image.FORMAT_RGBA8)
 	image.fill(WATER_COLOR)
@@ -115,6 +115,7 @@ func _spawn(model: DirectorSceneModel, region: Dictionary, global_collision: boo
 		sprite.scale = Vector2(rect.size.x / 64.0, rect.size.y / 64.0)
 		surface = sprite
 	surface.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	surface.z_index = int(region.get("layer", -15))
 	var mat := ShaderMaterial.new()
 	mat.shader = _shader
 	var flow := DirectorSceneModel.normalize_flow(

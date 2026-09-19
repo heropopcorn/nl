@@ -44,13 +44,13 @@ const KNOWN_EDITOR_KEYS := [
 	"show_baked_props", "water_collision_enabled", "snap_enabled", "snap_grid_px",
 ]
 const KNOWN_WATER_KEYS := [
-	"id", "name", "enabled", "shape", "rect_uv", "points_uv", "flow_dir", "flow_speed", "collision_enabled",
+	"id", "name", "enabled", "shape", "rect_uv", "points_uv", "flow_dir", "flow_speed", "collision_enabled", "layer",
 ]
 const KNOWN_ACTOR_KEYS := [
 	"id", "character_id", "display_name", "enabled", "start_uv", "layer", "route",
 ]
 const KNOWN_ROUTE_KEYS := ["points_uv", "speed_px_per_sec", "loop", "collision_mode", "visible"]
-const KNOWN_ELEMENT_KEYS := ["id", "asset_id", "display_name", "enabled", "position_uv", "layer", "scale"]
+const KNOWN_ELEMENT_KEYS := ["id", "asset_id", "display_name", "enabled", "position_uv", "layer", "scale", "flip_h"]
 const KNOWN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "layer"]
 const KNOWN_WEATHER_KEYS := ["enabled", "type", "intensity"]
 
@@ -650,6 +650,7 @@ func _parse_water(data: Dictionary) -> Dictionary:
 	out["flow_dir"] = vec2_to_arr(flow)
 	out["flow_speed"] = clampf(float(data.get("flow_speed", 0.22)), 0.0, FLOW_SPEED_MAX)
 	out["collision_enabled"] = bool(data.get("collision_enabled", true))
+	out["layer"] = _as_int(data.get("layer", -15), -15)
 	return out
 
 
@@ -694,6 +695,7 @@ func _parse_element(data: Dictionary) -> Dictionary:
 	out["position_uv"] = vec2_to_arr(clamp_uv(_vec2(data.get("position_uv", [0.5, 0.5]), Vector2(0.5, 0.5))))
 	out["layer"] = _as_int(data.get("layer", 0), 0)
 	out["scale"] = clampf(float(data.get("scale", 0.5)), 0.05, 4.0)
+	out["flip_h"] = bool(data.get("flip_h", false))
 	return out
 
 
@@ -752,6 +754,7 @@ func _export_water(region: Dictionary) -> Dictionary:
 		"flow_dir": region.get("flow_dir", [0, 1]),
 		"flow_speed": snap6(float(region.get("flow_speed", 0.22))),
 		"collision_enabled": bool(region.get("collision_enabled", true)),
+		"layer": _as_int(region.get("layer", -15), -15),
 	}
 	if region.has("points_uv"):
 		known["points_uv"] = region["points_uv"]
@@ -785,6 +788,7 @@ func _export_element(element: Dictionary) -> Dictionary:
 		"display_name": str(element.get("display_name", "元素")), "enabled": bool(element.get("enabled", true)),
 		"position_uv": element.get("position_uv", [0.5, 0.5]), "layer": _as_int(element.get("layer", 0), 0),
 		"scale": snap6(float(element.get("scale", 0.5))),
+		"flip_h": bool(element.get("flip_h", false)),
 	})
 
 

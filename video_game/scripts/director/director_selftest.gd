@@ -19,8 +19,32 @@ func run_model_and_repo() -> PackedStringArray:
 	_collect(errors, _test_atomic_backup())
 	_collect(errors, _test_path_safety())
 	_collect(errors, _test_upload_resize())
+	_collect(errors, _test_layout_v3_assets_and_fields())
 	_collect(errors, _test_v1_migration())
 	_collect(errors, _test_corrupt_recovery())
+	return errors
+
+
+func _test_layout_v3_assets_and_fields() -> PackedStringArray:
+	var errors: PackedStringArray = PackedStringArray()
+	var root := "user://director_desk_selftest/assets_%d/" % Time.get_ticks_usec()
+	var library := DirectorAssetLibrary.new(root)
+	var image := Image.create(24, 18, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.2, 0.7, 0.4, 0.8))
+	var imported := library.import_image(image.save_png_to_buffer(), "自定义树.png", "trees")
+	if imported.is_empty() or library.list_assets("trees").size() != 1:
+		errors.append("layout v3 custom asset import failed: %s" % library.last_error)
+	elif not library.asset_exists(str(imported.get("id", ""))):
+		errors.append("layout v3 custom asset file missing")
+	var model := _valid_stub()
+	model.elements = [{"id": "element_flip", "asset_id": "tree_oak", "display_name": "镜像树", "enabled": true, "position_uv": [0.5, 0.5], "layer": 2, "scale": 0.5, "flip_h": true}]
+	model.water_regions = [{"id": "water_layer", "name": "高层水流", "enabled": true, "shape": "rect", "rect_uv": [0.1, 0.1, 0.2, 0.2], "flow_dir": [0, 1], "flow_speed": 0.2, "collision_enabled": false, "layer": 7}]
+	var again := DirectorSceneModel.from_json_text(model.to_json_text())
+	if not bool(again.elements[0].get("flip_h", false)):
+		errors.append("layout v3 element flip_h roundtrip failed")
+	if int(again.water_regions[0].get("layer", -15)) != 7:
+		errors.append("layout v3 water layer roundtrip failed")
+	_rm_rf(root)
 	return errors
 
 

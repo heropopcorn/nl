@@ -1,22 +1,23 @@
 class_name DirectorDesk
 extends Control
 
-## Director Desk V2: chapter scenes, layered content, polygon water and ensemble playback.
+## Director Desk Layout V3: hierarchy/resources, inspector, project browser and canvas tools.
 
 enum Mode { SELECT, BOX_WATER, LASSO_WATER, LASSO_REGION, EDIT_ROUTE, PREVIEW }
 enum DragKind { NONE, WATER_MOVE, WATER_RESIZE, WATER_DIR, WATER_POINT, ROUTE_POINT, ELEMENT_MOVE, BOX }
 
 const HANDLE := 8.0
-const TOP_H := 48.0
-const BOTTOM_H := 72.0
-const LEFT_W := 240.0
-const RIGHT_W := 320.0
+const TOP_H := 44.0
+const BOTTOM_H := 184.0
+const LEFT_W := 250.0
+const RIGHT_W := 300.0
+const TOOL_W := 58.0
 const NARROW := 900.0
-const HELP_TEXT := """导演台 V2
+const HELP_TEXT := """导演台 Layout V3
 
-左栏按章节管理场景，章节和场景都可新建、重命名、删除和上下排序。数据保存在本机 user://director_desk/，不是云存档。
+左上 Hierarchy 列出当前场景的一切元素；左下资源列表提供默认/自定义资源；底部 Project 左选章节、右开场景。数据保存在本机 user://director_desk/，不是云存档。
 
-元素：从房屋、树木等素材库添加，拖动脚底锚点摆放。整数层级越高越靠前；同层按脚底 Y 排序。
+元素：从背景、树木、角色和房屋分类添加；自定义页可上传图片。整数层级越高越靠前；同层按脚底 Y 排序。
 
 底图区域与水域可用套索逐点圈选，双击、回点或 Enter 闭合。矩形水域还可拖四角缩放。水面有方向流纹，每块可设流向、流速和碰撞。
 
@@ -24,7 +25,7 @@ const HELP_TEXT := """导演台 V2
 
 天气：仅下雨，强度只影响画面。
 
-顶栏可清楚切换编辑模式 / 播放模式。本版播放当前场景；回到开头 / 播放 / 暂停 / 停止。播放时编辑锁定。
+顶栏文件/编辑菜单用于创建和维护内容；播放/停止控制当前场景，播放时编辑锁定。
 
 Space 播放或暂停，Esc 取消或停止，Ctrl+S 保存，Ctrl+Z 撤销。"""
 
@@ -35,6 +36,7 @@ var mode: Mode = Mode.SELECT
 var water: WaterRegionController
 var actors := ActorController.new()
 var content: SceneContentController
+var asset_library := DirectorAssetLibrary.new()
 var weather: WeatherController
 var gizmos: DirectorGizmos
 var preview := PreviewController.new()
@@ -44,6 +46,7 @@ var selected_water_id := ""
 var selected_actor_id := ""
 var selected_element_id := ""
 var selected_region_id := ""
+var selected_kind := "background"
 var selected_chapter_id := ""
 var selected_point := -2
 var _lasso_points: PackedVector2Array = PackedVector2Array()
@@ -67,6 +70,7 @@ var _pending_open_id := ""
 var _new_source := "preset"
 var _asset_choice := "tree_oak"
 var _asset_category := "houses"
+var _resource_scope := "default"
 var _asset_drawer_open := true
 var _placing_asset := false
 var _play_had_actor := false
@@ -77,18 +81,23 @@ var _top: PanelContainer
 var _left: PanelContainer
 var _right: PanelContainer
 var _bottom: PanelContainer
+var _tools: PanelContainer
 var _scene_name_label: Label
 var _mode_label: Label
 var _save_label: Label
 var _status_label: Label
 var _transport_label: Label
 var _search_edit: LineEdit
-var _scene_box: VBoxContainer
+var _scene_box: Container
+var _chapter_box: VBoxContainer
+var _hierarchy_box: VBoxContainer
+var _inspector_title: Label
 var _tabs: Control
 var _asset_drawer: PanelContainer
 var _asset_drawer_button: Button
 var _asset_grid: GridContainer
 var _asset_category_buttons: Dictionary = {}
+var _resource_scope_buttons: Dictionary = {}
 var _tab_index := 0
 var _tab_btns: Array[Button] = []
 var _tab_pages: Array[ScrollContainer] = []
@@ -118,10 +127,13 @@ var _rename_chapter_edit: LineEdit
 var _rename_chapter_id := ""
 var _delete_chapter_dialog: ConfirmationDialog
 var _delete_chapter_id := ""
+var _replace_background_dialog: ConfirmationDialog
+var _pending_background_action := ""
 
 
 func setup(host: VillageSandbox) -> void:
 	village = host
+	asset_library.ensure_root()
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	theme = _make_theme()
@@ -189,6 +201,9 @@ func render_gizmos(canvas: Node2D) -> void:
 	if village.camera:
 		zoom = maxf(village.camera.zoom.x, 0.2)
 	var handle := HANDLE / zoom
+	if selected_kind == "background" and village.terrain.texture:
+		var terrain_size := village.terrain_size()
+		canvas.draw_rect(Rect2(-terrain_size * 0.5, terrain_size), Color(1.0, 0.82, 0.35, 0.9), false, 3.0 / zoom)
 	if _drag == DragKind.BOX:
 		var rect := _normalized_world_rect(_box_a, _box_b)
 		canvas.draw_rect(rect, Color(0.45, 0.85, 1.0, 0.18), true)
@@ -269,6 +284,13 @@ func run_runtime_selftest() -> PackedStringArray:
 	if model == null:
 		errors.append("boot should create 示例村庄")
 		return errors
+	if _tools == null or _hierarchy_box == null or _chapter_box == null or _scene_box == null or _inspector_title == null:
+		errors.append("layout v3 regions missing")
+	elif _hierarchy_box.get_child_count() < 3:
+		errors.append("layout v3 hierarchy should list scene elements")
+	_select_hierarchy("background", "")
+	if selected_kind != "background" or _tab_pages[0].visible == false:
+		errors.append("layout v3 background hierarchy selection failed")
 	if not can_drop_asset(Vector2.ZERO, {"kind": "director_asset", "asset_id": "tree_oak"}):
 		errors.append("canvas should accept library asset drag")
 	var first_id := model.scene_id
@@ -463,7 +485,7 @@ func _build_world_helpers() -> void:
 	water.setup(village)
 	content = SceneContentController.new()
 	village.world.add_child(content)
-	content.setup(village)
+	content.setup(village, asset_library)
 	weather = WeatherController.new()
 	village.add_child(weather)
 	weather.setup()
@@ -495,20 +517,24 @@ func _build_hud() -> void:
 	_left = _chrome_panel()
 	_right = _chrome_panel()
 	_bottom = _chrome_panel()
+	_tools = _chrome_panel()
 	_left.custom_minimum_size.x = LEFT_W
 	_right.custom_minimum_size.x = RIGHT_W
 	_top.z_index = 4
 	_left.z_index = 4
 	_right.z_index = 4
 	_bottom.z_index = 4
+	_tools.z_index = 4
 	add_child(_top)
 	add_child(_left)
 	add_child(_right)
 	add_child(_bottom)
+	add_child(_tools)
 	_fill_top()
 	_fill_left()
 	_fill_right()
 	_fill_bottom()
+	_fill_tools()
 	_empty_label = _label("暂无场景，点击「新建场景」开始编排。", 16, true, true)
 	_empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_empty_label.anchor_left = 0.5
@@ -526,29 +552,45 @@ func _build_hud() -> void:
 
 func _fill_top() -> void:
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
+	row.add_theme_constant_override("separation", 6)
 	_top.add_child(row)
-	var title := _label("导演台", 18, true)
+	var title := _label("导演台 V3", 17, true)
 	title.clip_text = false
-	title.custom_minimum_size = Vector2(80, 0)
+	title.custom_minimum_size = Vector2(96, 0)
 	row.add_child(title)
+	var file_menu := MenuButton.new()
+	file_menu.text = "文件"
+	file_menu.get_popup().add_item("新建章节", 0)
+	file_menu.get_popup().add_item("新建场景", 1)
+	file_menu.get_popup().add_separator()
+	file_menu.get_popup().add_item("新建角色", 2)
+	file_menu.get_popup().add_item("新建水流区域", 3)
+	file_menu.get_popup().add_item("新建底图裁片区域", 4)
+	file_menu.get_popup().add_item("上传自定义资源", 5)
+	file_menu.get_popup().add_separator()
+	file_menu.get_popup().add_item("立即保存", 6)
+	file_menu.get_popup().id_pressed.connect(_on_file_menu)
+	row.add_child(file_menu)
+	var edit_menu := MenuButton.new()
+	edit_menu.text = "编辑"
+	edit_menu.get_popup().add_item("撤销", 0)
+	edit_menu.get_popup().add_item("重做", 1)
+	edit_menu.get_popup().add_item("删除所选元素", 2)
+	edit_menu.get_popup().id_pressed.connect(_on_edit_menu)
+	row.add_child(edit_menu)
 	_scene_name_label = _label("未选择场景", 15, false)
 	_scene_name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(_scene_name_label)
 	_mode_label = _label("编辑模式", 14, true)
 	_mode_label.add_theme_color_override("font_color", Color(0.45, 1.0, 0.62))
 	row.add_child(_mode_label)
-	row.add_child(_btn("编辑模式", func() -> void:
-		if preview.is_playing() or preview.is_paused(): _stop_preview(true)
-		_set_mode(Mode.SELECT)
-	))
-	row.add_child(_btn("播放模式", func() -> void: _try_play()))
+	_play_btn = _btn("播放", func() -> void: _toggle_play())
+	row.add_child(_play_btn)
+	row.add_child(_btn("停止", func() -> void: _stop_preview(true)))
 	_save_label = _label("已保存", 13, false)
 	_save_label.clip_text = false
 	_save_label.custom_minimum_size = Vector2(96, 0)
 	row.add_child(_save_label)
-	row.add_child(_btn("撤销", _undo))
-	row.add_child(_btn("重做", _redo))
 	_drawer_scene_btn = _btn("场景", func() -> void: _toggle_drawer(true))
 	_drawer_prop_btn = _btn("属性", func() -> void: _toggle_drawer(false))
 	row.add_child(_drawer_scene_btn)
@@ -560,47 +602,70 @@ func _fill_left() -> void:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 6)
 	_left.add_child(box)
-	box.add_child(_label("章节 / 场景", 15, true))
-	_search_edit = LineEdit.new()
-	_search_edit.placeholder_text = "搜索场景"
-	_search_edit.focus_mode = Control.FOCUS_CLICK
-	_search_edit.text_changed.connect(func(text: String) -> void:
-		_search_query = text
-		_refresh_scene_list()
-	)
-	box.add_child(_search_edit)
-	var create_row := HBoxContainer.new()
-	create_row.add_child(_btn("新建章节", _open_new_chapter_dialog))
-	create_row.add_child(_btn("新建场景", _open_new_dialog))
-	box.add_child(create_row)
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.custom_minimum_size = Vector2(0, 240)
-	box.add_child(scroll)
-	_scene_box = VBoxContainer.new()
-	_scene_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_scene_box)
+	var hierarchy_header := HBoxContainer.new()
+	hierarchy_header.add_child(_label("元素列表 / Hierarchy", 15, true))
+	var hierarchy_add := MenuButton.new()
+	hierarchy_add.text = "+"
+	hierarchy_add.get_popup().add_item("角色", 0)
+	hierarchy_add.get_popup().add_item("矩形水流", 1)
+	hierarchy_add.get_popup().add_item("多边形水流", 2)
+	hierarchy_add.get_popup().add_item("底图裁片区域", 3)
+	hierarchy_add.get_popup().id_pressed.connect(_on_hierarchy_add)
+	hierarchy_header.add_child(hierarchy_add)
+	box.add_child(hierarchy_header)
+	var hierarchy_scroll := ScrollContainer.new()
+	hierarchy_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	hierarchy_scroll.custom_minimum_size = Vector2(0, 150)
+	hierarchy_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	box.add_child(hierarchy_scroll)
+	_hierarchy_box = VBoxContainer.new()
+	_hierarchy_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hierarchy_scroll.add_child(_hierarchy_box)
+	box.add_child(HSeparator.new())
+	box.add_child(_label("资源列表", 15, true))
+	var scope_row := HBoxContainer.new()
+	_resource_scope_buttons.clear()
+	for scope in ["default", "custom"]:
+		var scope_id := str(scope)
+		var scope_button := _btn("默认资源" if scope_id == "default" else "自定义资源", func() -> void: _select_resource_scope(scope_id))
+		scope_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		scope_row.add_child(scope_button)
+		_resource_scope_buttons[scope_id] = scope_button
+	box.add_child(scope_row)
+	var category_row := HFlowContainer.new()
+	_asset_category_buttons.clear()
+	for item in [["backgrounds", "背景图"], ["trees", "树木"], ["characters", "角色"], ["houses", "房屋"]]:
+		var category_id := str(item[0])
+		var category_button := _btn(str(item[1]), func() -> void: _select_asset_category(category_id))
+		category_row.add_child(category_button)
+		_asset_category_buttons[category_id] = category_button
+	box.add_child(category_row)
+	_asset_drawer_button = _btn("上传到当前分类", _upload_custom_resource)
+	box.add_child(_asset_drawer_button)
+	var asset_scroll := ScrollContainer.new()
+	asset_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	asset_scroll.custom_minimum_size = Vector2(0, 150)
+	asset_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	box.add_child(asset_scroll)
+	_asset_grid = GridContainer.new()
+	_asset_grid.columns = 2
+	_asset_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	asset_scroll.add_child(_asset_grid)
 	_status_label = _label(" ", 13, false, true)
-	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status_label.custom_minimum_size = Vector2(200, 64)
+	_status_label.custom_minimum_size = Vector2(200, 42)
 	box.add_child(_status_label)
+	_select_asset_category("houses")
 
 
 func _fill_right() -> void:
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 6)
 	_right.add_child(col)
-	var tab_row := HBoxContainer.new()
+	_inspector_title = _label("属性 / Inspector", 15, true)
+	col.add_child(_inspector_title)
 	var names := ["场景", "水域", "角色", "天气"]
 	_tab_btns.clear()
 	_tab_pages.clear()
-	for i in range(names.size()):
-		var idx := i
-		var button := _btn(names[i], func() -> void: _select_tab(idx))
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		tab_row.add_child(button)
-		_tab_btns.append(button)
-	col.add_child(tab_row)
 	_tabs = Control.new()
 	_tabs.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_tabs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -613,49 +678,20 @@ func _fill_right() -> void:
 		scroll.visible = i == 0
 		_tabs.add_child(scroll)
 		_tab_pages.append(scroll)
-	_asset_drawer_button = _btn("收起素材抽屉", _toggle_asset_drawer, 32)
-	col.add_child(_asset_drawer_button)
-	_asset_drawer = PanelContainer.new()
-	_asset_drawer.custom_minimum_size.y = 300
-	col.add_child(_asset_drawer)
-	var drawer_col := VBoxContainer.new()
-	drawer_col.add_theme_constant_override("separation", 6)
-	_asset_drawer.add_child(drawer_col)
-	var category_row := HBoxContainer.new()
-	category_row.add_theme_constant_override("separation", 4)
-	drawer_col.add_child(category_row)
-	_asset_category_buttons.clear()
-	for category in SceneContentController.CATEGORY_LABELS:
-		var category_id := str(category)
-		var category_button := _btn(str(SceneContentController.CATEGORY_LABELS[category]), func() -> void:
-			_select_asset_category(category_id)
-		)
-		category_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		category_row.add_child(category_button)
-		_asset_category_buttons[category_id] = category_button
-	var asset_scroll := ScrollContainer.new()
-	asset_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	asset_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	drawer_col.add_child(asset_scroll)
-	_asset_grid = GridContainer.new()
-	_asset_grid.columns = 2
-	_asset_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_asset_grid.add_theme_constant_override("h_separation", 6)
-	_asset_grid.add_theme_constant_override("v_separation", 6)
-	asset_scroll.add_child(_asset_grid)
-	drawer_col.add_child(_label("拖到画布放置；点击后再点画布也可以。", 12, false, true))
-	_rebuild_asset_drawer()
 	_select_tab(0)
 
 
 func _toggle_asset_drawer() -> void:
-	_asset_drawer_open = not _asset_drawer_open
-	_asset_drawer.visible = _asset_drawer_open
-	_asset_drawer_button.text = "收起素材抽屉" if _asset_drawer_open else "展开素材抽屉"
+	_set_status("资源列表已固定在左下区域。")
 
 
 func _select_asset_category(category: String) -> void:
 	_asset_category = category
+	_rebuild_asset_drawer()
+
+
+func _select_resource_scope(scope: String) -> void:
+	_resource_scope = scope
 	_rebuild_asset_drawer()
 
 
@@ -668,24 +704,45 @@ func _rebuild_asset_drawer() -> void:
 	for category in _asset_category_buttons:
 		var category_button: Button = _asset_category_buttons[category]
 		category_button.modulate = Color(1.15, 0.95, 0.55) if category == _asset_category else Color.WHITE
-	var button_script := load("res://scripts/director/asset_drag_button.gd") as Script
-	for asset in SceneContentController.assets_in_category(_asset_category):
-		var asset_id := str(asset.get("id", ""))
-		var tile: Button = button_script.new()
-		tile.asset_id = asset_id
-		tile.text = str(asset.get("label", asset_id))
-		tile.tooltip_text = "拖到画布放置；单击后可在画布点选位置"
-		tile.custom_minimum_size = Vector2(132, 112)
-		tile.focus_mode = Control.FOCUS_NONE
-		tile.expand_icon = true
-		tile.add_theme_constant_override("icon_max_width", 78)
-		tile.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		tile.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
-		var path := "res://art/sliced/%s.png" % asset_id
-		if ResourceLoader.exists(path):
-			tile.icon = load(path)
-		tile.pressed.connect(func() -> void: _choose_asset_for_canvas(asset_id))
-		_asset_grid.add_child(tile)
+	for scope in _resource_scope_buttons:
+		var scope_button: Button = _resource_scope_buttons[scope]
+		scope_button.modulate = Color(1.15, 0.95, 0.55) if scope == _resource_scope else Color.WHITE
+	_asset_drawer_button.visible = _resource_scope == "custom"
+	if _resource_scope == "custom":
+		for custom in asset_library.list_assets(_asset_category):
+			_add_resource_tile(custom, true)
+		if _asset_grid.get_child_count() == 0:
+			_asset_grid.add_child(_label("当前分类没有自定义资源。", 12, false, true))
+		return
+	if _asset_category == "backgrounds":
+		_add_resource_tile({"id": "background_village", "name": "村庄背景", "category": "backgrounds"}, false)
+		_add_resource_tile({"id": "background_blank", "name": "空白背景", "category": "backgrounds"}, false)
+		return
+	if _asset_category == "characters":
+		_add_resource_tile({"id": CharacterRegistry.FARMER, "name": "农夫", "category": "characters"}, false)
+		_add_resource_tile({"id": CharacterRegistry.FARMER_BLUE, "name": "蓝衣农夫", "category": "characters"}, false)
+		return
+	var source_category := "trees" if _asset_category == "trees" else "houses"
+	for asset in SceneContentController.assets_in_category(source_category):
+		_add_resource_tile({"id": asset.get("id", ""), "name": asset.get("label", "资源"), "category": _asset_category}, false)
+
+
+func _add_resource_tile(asset: Dictionary, custom: bool) -> void:
+	var asset_id := str(asset.get("id", ""))
+	var category := str(asset.get("category", _asset_category))
+	var tile := _btn(str(asset.get("name", asset_id)), func() -> void: _activate_resource(asset_id, category, custom), 48)
+	tile.tooltip_text = "点击使用此资源"
+	tile.custom_minimum_size.x = 106
+	var path := asset_library.texture_path(asset_id) if custom else "res://art/sliced/%s.png" % asset_id
+	if custom and not path.is_empty():
+		var image := Image.new()
+		if image.load_png_from_buffer(FileAccess.get_file_as_bytes(path)) == OK:
+			tile.icon = ImageTexture.create_from_image(image)
+	elif ResourceLoader.exists(path):
+		tile.icon = load(path)
+	tile.expand_icon = true
+	tile.add_theme_constant_override("icon_max_width", 48)
+	_asset_grid.add_child(tile)
 
 
 func _select_tab(index: int) -> void:
@@ -698,26 +755,60 @@ func _select_tab(index: int) -> void:
 
 
 func _fill_bottom() -> void:
-	var row := HFlowContainer.new()
-	row.add_theme_constant_override("separation", 6)
-	row.alignment = FlowContainer.ALIGNMENT_BEGIN
-	_bottom.add_child(row)
-	_mode_btns[Mode.SELECT] = _btn("选择", func() -> void: _set_mode(Mode.SELECT))
-	_mode_btns[Mode.BOX_WATER] = _btn("框选水域", func() -> void: _set_mode(Mode.BOX_WATER))
-	_mode_btns[Mode.LASSO_WATER] = _btn("套索水域", func() -> void: _set_mode(Mode.LASSO_WATER))
-	_mode_btns[Mode.LASSO_REGION] = _btn("圈底图层", func() -> void: _set_mode(Mode.LASSO_REGION))
-	_mode_btns[Mode.EDIT_ROUTE] = _btn("编辑路线", func() -> void: _set_mode(Mode.EDIT_ROUTE))
-	for child in _mode_btns.values():
-		row.add_child(child)
-	row.add_child(_btn("回到开头", func() -> void: _stop_preview(false)))
-	_play_btn = _btn("播放", func() -> void: _toggle_play())
-	row.add_child(_play_btn)
-	row.add_child(_btn("停止", func() -> void: _stop_preview(true)))
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 4)
+	_bottom.add_child(col)
+	var header := HBoxContainer.new()
+	header.add_child(_label("Project · 章节 / 场景", 15, true))
+	header.add_child(_btn("新建章节", _open_new_chapter_dialog))
+	header.add_child(_btn("新建场景", _open_new_dialog))
+	_search_edit = LineEdit.new()
+	_search_edit.placeholder_text = "搜索场景"
+	_search_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_search_edit.text_changed.connect(func(text: String) -> void: _search_query = text; _refresh_scene_list())
+	header.add_child(_search_edit)
 	_loop_box = _checkbox("循环预览", false, func(v: bool) -> void: preview.loop_preview = v)
-	row.add_child(_loop_box)
+	header.add_child(_loop_box)
 	_transport_label = _label("已停止", 13, false)
-	_transport_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(_transport_label)
+	header.add_child(_transport_label)
+	col.add_child(header)
+	var body := HBoxContainer.new()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(body)
+	var chapter_scroll := ScrollContainer.new()
+	chapter_scroll.custom_minimum_size.x = 230
+	chapter_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	body.add_child(chapter_scroll)
+	_chapter_box = VBoxContainer.new()
+	_chapter_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chapter_scroll.add_child(_chapter_box)
+	var scene_scroll := ScrollContainer.new()
+	scene_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scene_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	body.add_child(scene_scroll)
+	_scene_box = HFlowContainer.new()
+	_scene_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scene_scroll.add_child(_scene_box)
+
+
+func _fill_tools() -> void:
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 6)
+	_tools.add_child(col)
+	col.add_child(_label("工具", 13, true))
+	_mode_btns[Mode.SELECT] = _btn("移动", func() -> void: _set_mode(Mode.SELECT), 38)
+	_mode_btns[Mode.BOX_WATER] = _btn("水域", func() -> void: _set_mode(Mode.BOX_WATER), 38)
+	_mode_btns[Mode.LASSO_WATER] = _btn("套索", func() -> void: _set_mode(Mode.LASSO_WATER), 38)
+	_mode_btns[Mode.LASSO_REGION] = _btn("裁片", func() -> void: _set_mode(Mode.LASSO_REGION), 38)
+	_mode_btns[Mode.EDIT_ROUTE] = _btn("路线", func() -> void: _set_mode(Mode.EDIT_ROUTE), 38)
+	for child in _mode_btns.values():
+		col.add_child(child)
+	col.add_child(_btn("缩放", func() -> void: _set_status("请在属性面板调整元素缩放。"), 38))
+	var rotate := _btn("旋转", func() -> void: pass, 38)
+	rotate.disabled = true
+	rotate.tooltip_text = "后续开放"
+	col.add_child(rotate)
+	col.add_child(_btn("镜像", _toggle_selected_flip, 38))
 
 
 func _make_scroll(title: String) -> ScrollContainer:
@@ -804,6 +895,147 @@ func _build_dialogs() -> void:
 	_delete_chapter_dialog.cancel_button_text = "取消"
 	_delete_chapter_dialog.confirmed.connect(_confirm_delete_chapter)
 	add_child(_delete_chapter_dialog)
+	_replace_background_dialog = ConfirmationDialog.new()
+	_replace_background_dialog.title = "替换背景"
+	_replace_background_dialog.dialog_text = "当前场景已有背景图，是否替换？"
+	_replace_background_dialog.ok_button_text = "替换"
+	_replace_background_dialog.cancel_button_text = "取消"
+	_replace_background_dialog.confirmed.connect(_confirm_background_replace)
+	add_child(_replace_background_dialog)
+
+
+func _on_file_menu(id: int) -> void:
+	match id:
+		0: _open_new_chapter_dialog()
+		1: _open_new_dialog()
+		2: _add_actor_clicked()
+		3: _set_mode(Mode.BOX_WATER)
+		4: _set_mode(Mode.LASSO_REGION)
+		5: _upload_custom_resource()
+		6: _flush_save()
+
+
+func _on_edit_menu(id: int) -> void:
+	match id:
+		0: _undo()
+		1: _redo()
+		2: _delete_selected()
+
+
+func _on_hierarchy_add(id: int) -> void:
+	match id:
+		0: _add_actor_clicked()
+		1: _set_mode(Mode.BOX_WATER)
+		2: _set_mode(Mode.LASSO_WATER)
+		3: _set_mode(Mode.LASSO_REGION)
+
+
+func _activate_resource(asset_id: String, category: String, custom: bool) -> void:
+	if model == null:
+		_set_status("请先打开或新建场景。")
+		return
+	if category == "backgrounds":
+		_request_background_replace(("custom:" + asset_id) if custom else asset_id)
+		return
+	if category == "characters" and not custom:
+		_add_actor_resource(asset_id)
+		return
+	_choose_asset_for_canvas(asset_id)
+	if custom and category == "characters":
+		_set_status("自定义角色图片将先作为静态元素放置；序列帧路线在后续版本开放。")
+
+
+func _add_actor_resource(character_id: String) -> void:
+	if model == null:
+		return
+	_begin_cmd()
+	var offset := Vector2(0.04 * (model.actors.size() % 5), 0.04 * (model.actors.size() % 3))
+	var actor := _new_actor(character_id, (Vector2(0.42, 0.42) + offset).clamp(Vector2.ZERO, Vector2.ONE), [])
+	model.actors.append(actor)
+	_end_cmd()
+	_select_hierarchy("actor", str(actor.get("id", "")))
+	_sync_world()
+	_set_status("已添加角色；可在属性面板添加和编辑路线。")
+
+
+func _upload_custom_resource() -> void:
+	_resource_scope = "custom"
+	_pick_reason = "custom_asset:" + _asset_category
+	_picker.pick()
+
+
+func _request_background_replace(action: String) -> void:
+	if model == null:
+		_set_status("请先打开或新建场景。")
+		return
+	_pending_background_action = action
+	_replace_background_dialog.popup_centered()
+
+
+func _confirm_background_replace() -> void:
+	var action := _pending_background_action
+	_pending_background_action = ""
+	if action == "background_village":
+		_begin_cmd()
+		model.background = {"source": "preset", "preset_id": DirectorSceneModel.PRESET_VILLAGE, "file": null, "pixel_size": [DirectorSceneModel.PRESET_PIXEL.x, DirectorSceneModel.PRESET_PIXEL.y]}
+		model.editor["show_baked_props"] = true
+		_end_cmd()
+		_sync_world()
+	elif action == "background_blank":
+		_replace_with_blank()
+	elif action.begins_with("custom:"):
+		_apply_custom_background(action.trim_prefix("custom:"))
+	_refresh_hierarchy()
+	_refresh_inspector()
+
+
+func _apply_custom_background(asset_id: String) -> void:
+	var source := asset_library.texture_path(asset_id)
+	if source.is_empty() or not FileAccess.file_exists(source):
+		_set_status("找不到自定义背景资源。")
+		return
+	var image := Image.new()
+	if image.load_png_from_buffer(FileAccess.get_file_as_bytes(source)) != OK:
+		_set_status("无法解码自定义背景。")
+		return
+	var target := repo.resolve_scene_file(model.scene_id, "background.png")
+	if target.is_empty() or image.save_png(target) != OK:
+		_set_status("无法保存场景背景。")
+		return
+	var info := asset_library.info(asset_id)
+	_begin_cmd()
+	model.background = {"source": "uploaded", "preset_id": null, "file": "background.png", "original_file_name": str(info.get("name", "自定义背景")), "pixel_size": [image.get_width(), image.get_height()]}
+	model.editor["show_baked_props"] = false
+	_end_cmd()
+	_sync_world()
+
+
+func _toggle_selected_flip() -> void:
+	var element := _element_by_id(selected_element_id)
+	if element.is_empty():
+		_set_status("请先选择树木、房屋或图片元素。")
+		return
+	_begin_cmd()
+	element["flip_h"] = not bool(element.get("flip_h", false))
+	_end_cmd()
+	_sync_world()
+	_refresh_inspector()
+
+
+func _delete_selected() -> void:
+	if model == null:
+		return
+	match selected_kind:
+		"element": _delete_selected_element()
+		"background_region": _delete_selected_region()
+		"water":
+			_begin_cmd(); _remove_water(selected_water_id); _end_cmd(); _select_hierarchy("background", ""); _sync_world()
+		"actor":
+			_begin_cmd()
+			for i in range(model.actors.size() - 1, -1, -1):
+				if str(model.actors[i].get("id", "")) == selected_actor_id: model.actors.remove_at(i)
+			_end_cmd(); _select_hierarchy("background", ""); _sync_world()
+		_: _set_status("当前元素不能删除。")
 
 
 func _process(delta: float) -> void:
@@ -990,6 +1222,7 @@ func _click_select(world: Vector2) -> void:
 	var zoom := village.camera.zoom.x if village.camera else 1.0
 	var hit_actor_id := actors.hit_actor(world, zoom)
 	if not hit_actor_id.is_empty():
+		selected_kind = "actor"
 		selected_actor_id = hit_actor_id
 		selected_point = -1
 		selected_water_id = ""
@@ -999,6 +1232,7 @@ func _click_select(world: Vector2) -> void:
 		_drag = DragKind.ROUTE_POINT
 		_select_tab(2)
 		_refresh_inspector()
+		_refresh_hierarchy()
 		return
 	var selected_actor := actors.actor_by_id(model, selected_actor_id)
 	if not selected_actor.is_empty():
@@ -1010,6 +1244,7 @@ func _click_select(world: Vector2) -> void:
 			return
 	var element_id := content.hit_element(world)
 	if not element_id.is_empty():
+		selected_kind = "element"
 		selected_element_id = element_id
 		selected_actor_id = ""
 		selected_water_id = ""
@@ -1018,9 +1253,11 @@ func _click_select(world: Vector2) -> void:
 		_drag = DragKind.ELEMENT_MOVE
 		_select_tab(0)
 		_refresh_inspector()
+		_refresh_hierarchy()
 		return
 	var rid := water.hit_region(world, model)
 	if not rid.is_empty():
+		selected_kind = "water"
 		selected_water_id = rid
 		selected_actor_id = ""
 		selected_element_id = ""
@@ -1044,30 +1281,37 @@ func _click_select(world: Vector2) -> void:
 			else:
 				_drag = DragKind.WATER_MOVE
 		_refresh_inspector()
+		_refresh_hierarchy()
 		return
 	var region_id := content.hit_background_region(world)
 	if not region_id.is_empty():
+		selected_kind = "background_region"
 		selected_region_id = region_id
 		selected_water_id = ""
 		selected_actor_id = ""
 		selected_element_id = ""
 		_select_tab(0)
 		_refresh_inspector()
+		_refresh_hierarchy()
 		return
 	selected_water_id = ""
 	selected_actor_id = ""
 	selected_element_id = ""
 	selected_region_id = ""
 	selected_point = -2
+	selected_kind = "background"
 	_refresh_inspector()
+	_refresh_hierarchy()
 
 
 func _click_route(world: Vector2) -> void:
 	var hit_actor_id := actors.hit_actor(world, village.camera.zoom.x if village.camera else 1.0)
 	if not hit_actor_id.is_empty() and hit_actor_id != selected_actor_id:
+		selected_kind = "actor"
 		selected_actor_id = hit_actor_id
 		selected_point = -2
 		_refresh_inspector()
+		_refresh_hierarchy()
 		_set_status("已选择角色；现在可编辑这名角色的路线。")
 		return
 	var actor := actors.actor_by_id(model, selected_actor_id)
@@ -1116,10 +1360,12 @@ func _finish_box() -> void:
 	var id := DirectorSceneModel.new_hex_id("water_", 4)
 	_add_water(uv, Vector2(0, 1), id)
 	selected_water_id = id
+	selected_kind = "water"
 	_end_cmd()
 	_sync_world()
 	_select_tab(1)
 	_refresh_inspector()
+	_refresh_hierarchy()
 	if model.has_water_overlap():
 		_set_status("水域不能重叠")
 	else:
@@ -1151,9 +1397,10 @@ func _finish_lasso() -> void:
 		model.water_regions.append({
 			"id": water_id, "name": "套索水域", "enabled": true, "shape": "polygon",
 			"points_uv": points, "rect_uv": [0, 0, 0, 0], "flow_dir": [0, 1],
-			"flow_speed": 0.22, "collision_enabled": true,
+			"flow_speed": 0.22, "collision_enabled": true, "layer": -15,
 		})
 		selected_water_id = water_id
+		selected_kind = "water"
 		selected_region_id = ""
 		_select_tab(1)
 	else:
@@ -1162,12 +1409,14 @@ func _finish_lasso() -> void:
 			"id": region_id, "name": "底图区域", "enabled": true, "points_uv": points, "layer": 1,
 		})
 		selected_region_id = region_id
+		selected_kind = "background_region"
 		selected_water_id = ""
 		_select_tab(0)
 	_lasso_points = PackedVector2Array()
 	_end_cmd()
 	_sync_world()
 	_refresh_inspector()
+	_refresh_hierarchy()
 	_set_mode(Mode.SELECT)
 	_set_status("已创建圈选区域。" if not model.has_water_overlap() else "水域不能重叠")
 
@@ -1178,9 +1427,10 @@ func _apply_loaded_model(loaded: DirectorSceneModel) -> void:
 	undo.clear()
 	_dirty = false
 	selected_water_id = ""
-	selected_actor_id = str(loaded.actors[0].get("id", "")) if not loaded.actors.is_empty() else ""
+	selected_actor_id = ""
 	selected_element_id = ""
 	selected_region_id = ""
+	selected_kind = "background"
 	_lasso_points = PackedVector2Array()
 	selected_point = -2
 	preview.state = PreviewController.State.STOPPED
@@ -1256,6 +1506,7 @@ func _apply_legacy() -> void:
 
 func _set_empty_scene() -> void:
 	model = null
+	selected_kind = ""
 	undo.clear()
 	village.hide_legacy_water()
 	water.rebuild(null)
@@ -1269,6 +1520,7 @@ func _set_empty_scene() -> void:
 
 func _refresh_all() -> void:
 	_refresh_scene_list()
+	_refresh_hierarchy()
 	_refresh_inspector()
 	_refresh_mode_buttons()
 	if model:
@@ -1277,21 +1529,78 @@ func _refresh_all() -> void:
 
 
 func _refresh_scene_list() -> void:
-	if _scene_box == null or repo == null:
+	if _scene_box == null or _chapter_box == null or repo == null:
 		return
 	for child in _scene_box.get_children():
 		_scene_box.remove_child(child)
+		child.free()
+	for child in _chapter_box.get_children():
+		_chapter_box.remove_child(child)
 		child.free()
 	if model == null:
 		_scene_name_label.text = "未选择场景"
 	for chapter in repo.list_chapters():
 		var cid := str(chapter.get("id", ""))
-		_scene_box.add_child(_chapter_card(chapter))
-		for entry in repo.list_entries(cid):
-			var scene_name := str(entry.get("name", ""))
-			if not _search_query.is_empty() and scene_name.findn(_search_query) < 0 and str(chapter.get("name", "")).findn(_search_query) < 0:
-				continue
-			_scene_box.add_child(_scene_card(entry))
+		_chapter_box.add_child(_chapter_card(chapter))
+	if selected_chapter_id.is_empty() and not repo.list_chapters().is_empty():
+		selected_chapter_id = str(repo.list_chapters()[0].get("id", ""))
+	for entry in repo.list_entries(selected_chapter_id):
+		var scene_name := str(entry.get("name", ""))
+		if not _search_query.is_empty() and scene_name.findn(_search_query) < 0:
+			continue
+		_scene_box.add_child(_scene_card(entry))
+	if _scene_box.get_child_count() == 0:
+		_scene_box.add_child(_label("这个章节还没有场景。", 13, false))
+
+
+func _refresh_hierarchy() -> void:
+	if _hierarchy_box == null:
+		return
+	for child in _hierarchy_box.get_children():
+		_hierarchy_box.remove_child(child)
+		child.free()
+	if model == null:
+		_hierarchy_box.add_child(_label("请先在下方 Project 打开场景。", 13, false, true))
+		return
+	_hierarchy_box.add_child(_hierarchy_button("▾ 场景 · " + model.name, "scene", ""))
+	_hierarchy_box.add_child(_hierarchy_button("  背景图", "background", ""))
+	for region in model.background_regions:
+		_hierarchy_box.add_child(_hierarchy_button("    └ 裁片 · " + str(region.get("name", "底图区域")), "background_region", str(region.get("id", ""))))
+	for element in model.elements:
+		_hierarchy_box.add_child(_hierarchy_button("  元素 · " + str(element.get("display_name", "元素")), "element", str(element.get("id", ""))))
+	for actor in model.actors:
+		_hierarchy_box.add_child(_hierarchy_button("  角色 · " + str(actor.get("display_name", "角色")), "actor", str(actor.get("id", ""))))
+	for region in model.water_regions:
+		_hierarchy_box.add_child(_hierarchy_button("  水流 · " + str(region.get("name", "水域")), "water", str(region.get("id", ""))))
+	_hierarchy_box.add_child(_hierarchy_button("  特效 · 下雨", "weather", "weather"))
+
+
+func _hierarchy_button(label_text: String, kind: String, id: String) -> Button:
+	var button := _btn(label_text, func() -> void: _select_hierarchy(kind, id))
+	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	var selected := selected_kind == kind
+	if kind == "element": selected = selected and selected_element_id == id
+	elif kind == "actor": selected = selected and selected_actor_id == id
+	elif kind == "water": selected = selected and selected_water_id == id
+	elif kind == "background_region": selected = selected and selected_region_id == id
+	button.modulate = Color(1.2, 1.05, 0.68) if selected else Color.WHITE
+	return button
+
+
+func _select_hierarchy(kind: String, id: String) -> void:
+	selected_kind = kind
+	selected_element_id = id if kind == "element" else ""
+	selected_actor_id = id if kind == "actor" else ""
+	selected_water_id = id if kind == "water" else ""
+	selected_region_id = id if kind == "background_region" else ""
+	selected_point = -2
+	match kind:
+		"water": _select_tab(1)
+		"actor": _select_tab(2)
+		"weather": _select_tab(3)
+		_: _select_tab(0)
+	_refresh_hierarchy()
+	_refresh_inspector()
 
 
 func _chapter_card(chapter: Dictionary) -> PanelContainer:
@@ -1380,6 +1689,9 @@ func _scene_card(entry: Dictionary) -> PanelContainer:
 func _refresh_inspector() -> void:
 	if _tab_pages.size() < 4:
 		return
+	if _inspector_title:
+		var labels := {"background": "背景属性", "element": "元素属性", "actor": "角色属性", "water": "水流属性", "background_region": "裁片区域属性", "weather": "特效属性", "scene": "场景属性"}
+		_inspector_title.text = "属性 / " + str(labels.get(selected_kind, "Inspector"))
 	_loading = true
 	_fill_scene_tab()
 	_fill_water_tab()
@@ -1410,13 +1722,15 @@ func _fill_scene_tab() -> void:
 	if model == null:
 		inner.add_child(_label("没有打开的场景。", 13, false))
 		return
+	if selected_kind == "background":
+		inner.add_child(_label("当前背景下的裁片区域：%d 块" % model.background_regions.size(), 12, false))
+		for item in model.background_regions:
+			var region_id := str(item.get("id", ""))
+			inner.add_child(_btn("选择 · " + str(item.get("name", "底图区域")), func() -> void: _select_hierarchy("background_region", region_id)))
 	inner.add_child(_btn("更换背景", _open_replace_background))
 	inner.add_child(_btn("空白画布", _replace_with_blank))
 	inner.add_child(_label("摆放元素", 13, true))
-	inner.add_child(_label("使用下方素材抽屉分类浏览；可直接拖到画布。", 12, false, true))
-	inner.add_child(_btn("展开素材抽屉", func() -> void:
-		if not _asset_drawer_open: _toggle_asset_drawer()
-	))
+	inner.add_child(_label("请从左下资源列表选择素材，再到画布点击放置。", 12, false, true))
 	inner.add_child(_btn("套索圈选底图层", func() -> void: _set_mode(Mode.LASSO_REGION)))
 	var element := _element_by_id(selected_element_id)
 	if not element.is_empty():
@@ -1442,6 +1756,14 @@ func _fill_scene_tab() -> void:
 		element_scale.value_changed.connect(func(value: float) -> void: element["scale"] = value; content.rebuild(model))
 		element_scale.drag_ended.connect(func(_changed: bool) -> void: _end_cmd())
 		inner.add_child(element_scale)
+		inner.add_child(_checkbox("水平镜像", bool(element.get("flip_h", false)), func(value: bool) -> void:
+			if _loading: return
+			_begin_cmd(); element["flip_h"] = value; _end_cmd(); _sync_world()
+		))
+		var motion_button := _btn("添加路线（后续开放）", func() -> void: pass)
+		motion_button.disabled = true
+		motion_button.tooltip_text = "当前仅角色支持路线；普通元素路线已预留。"
+		inner.add_child(motion_button)
 		inner.add_child(_btn("删除当前元素", _delete_selected_element))
 	var bg_region := _background_region_by_id(selected_region_id)
 	if not bg_region.is_empty():
@@ -1511,6 +1833,17 @@ func _fill_water_tab() -> void:
 		inner.add_child(_label("在画布框选或点选一块水域。", 13, false))
 		return
 	inner.add_child(_label("形状：%s" % ("多边形" if str(region.get("shape", "rect")) == "polygon" else "可缩放矩形"), 12, false))
+	inner.add_child(_label("显示层级", 13, true))
+	var water_layer := SpinBox.new()
+	water_layer.min_value = -100
+	water_layer.max_value = 100
+	water_layer.step = 1
+	water_layer.value = int(region.get("layer", -15))
+	water_layer.value_changed.connect(func(value: float) -> void:
+		if _loading: return
+		_begin_cmd(); region["layer"] = int(value); _end_cmd(); _sync_world()
+	)
+	inner.add_child(water_layer)
 	inner.add_child(_label("流向", 13, true))
 	var dirs := [
 		["上", Vector2(0, -1)], ["下", Vector2(0, 1)], ["左", Vector2(-1, 0)], ["右", Vector2(1, 0)],
@@ -1552,9 +1885,11 @@ func _fill_water_tab() -> void:
 		_begin_cmd()
 		_remove_water(selected_water_id)
 		selected_water_id = ""
+		selected_kind = "background"
 		_end_cmd()
 		_sync_world()
 		_refresh_inspector()
+		_refresh_hierarchy()
 	))
 
 
@@ -1569,9 +1904,11 @@ func _fill_actor_tab() -> void:
 		for item in model.actors:
 			var actor_id := str(item.get("id", ""))
 			var choose := _btn(("当前 " if actor_id == selected_actor_id else "选择 ") + str(item.get("display_name", "角色")), func() -> void:
+				selected_kind = "actor"
 				selected_actor_id = actor_id
 				selected_point = -2
 				_refresh_inspector()
+				_refresh_hierarchy()
 			)
 			inner.add_child(choose)
 	var actor := actors.actor_by_id(model, selected_actor_id) if model else {}
@@ -1647,9 +1984,11 @@ func _fill_actor_tab() -> void:
 			if str(model.actors[i].get("id", "")) == selected_actor_id:
 				model.actors.remove_at(i)
 		selected_actor_id = str(model.actors[0].get("id", "")) if not model.actors.is_empty() else ""
+		selected_kind = "actor" if not selected_actor_id.is_empty() else "background"
 		_end_cmd()
 		_sync_world()
 		_refresh_inspector()
+		_refresh_hierarchy()
 	))
 
 
@@ -1669,6 +2008,7 @@ func _fill_weather_tab() -> void:
 		weather.apply(model)
 	))
 	inner.add_child(_label("天气效果：下雨", 13, false))
+	inner.add_child(_label("范围：当前为全屏。雾气和多范围特效将在后续版本开放。", 12, false, true))
 	inner.add_child(_label("强度", 13, true))
 	var sl := HSlider.new()
 	sl.min_value = 0
@@ -1696,10 +2036,12 @@ func _add_actor_clicked() -> void:
 	var actor := _new_actor(CharacterRegistry.FARMER, (Vector2(0.42, 0.42) + offset).clamp(Vector2.ZERO, Vector2.ONE), [])
 	model.actors.append(actor)
 	selected_actor_id = str(actor.get("id", ""))
+	selected_kind = "actor"
 	_end_cmd()
 	_sync_world()
 	_select_tab(2)
 	_refresh_inspector()
+	_refresh_hierarchy()
 	_set_status("已添加角色。点选角色后编辑它自己的路线。")
 
 
@@ -2104,6 +2446,16 @@ func _on_image_picked(bytes: PackedByteArray, filename: String) -> void:
 	if bytes.size() > DirectorImages.MAX_BYTES:
 		_set_status("图片文件超过 12 MiB")
 		return
+	if _pick_reason.begins_with("custom_asset:"):
+		var category := _pick_reason.trim_prefix("custom_asset:")
+		var imported := asset_library.import_image(bytes, filename, category)
+		if imported.is_empty():
+			_set_status(asset_library.last_error if not asset_library.last_error.is_empty() else "无法导入自定义资源")
+			return
+		_resource_scope = "custom"
+		_rebuild_asset_drawer()
+		_set_status("已导入自定义资源：%s" % str(imported.get("name", filename)))
+		return
 	if _pick_reason == "replace" and model:
 		var decoded := DirectorImages.decode_upload(bytes)
 		if not bool(decoded["ok"]):
@@ -2148,6 +2500,7 @@ func _add_water(uv: Rect2, dir: Vector2, id: String) -> void:
 		"flow_dir": DirectorSceneModel.vec2_to_arr(flow),
 		"flow_speed": 0.22,
 		"collision_enabled": true,
+		"layer": -15,
 	})
 
 
@@ -2215,34 +2568,44 @@ func _choose_asset_for_canvas(asset_id: String) -> void:
 	if _preview_locked_edits():
 		_set_status("播放模式中不能放置素材。")
 		return
+	if not content.has_asset(asset_id):
+		_set_status("找不到资源。")
+		return
 	_asset_choice = asset_id
 	_placing_asset = true
 	_set_mode(Mode.SELECT)
-	_set_status("已选择%s；请在画布点击放置，或直接把卡片拖到画布。" % SceneContentController.asset_label(asset_id))
+	_set_status("已选择%s；请在画布点击放置。" % content.asset_label_for(asset_id))
 
 
 func _place_asset_at(asset_id: String, uv: Vector2) -> void:
-	if model == null or not SceneContentController.asset_exists(asset_id):
+	if model == null or not content.has_asset(asset_id):
 		return
 	var asset := SceneContentController.asset_info(asset_id)
+	var is_custom := asset.is_empty()
+	var custom_info := asset_library.info(asset_id) if is_custom else {}
 	_begin_cmd()
 	var element := {
 		"id": DirectorSceneModel.new_hex_id("element_", 4), "asset_id": asset_id,
-		"display_name": SceneContentController.asset_label(asset_id), "enabled": true,
+		"display_name": content.asset_label_for(asset_id), "enabled": true,
 		"position_uv": DirectorSceneModel.vec2_to_arr(uv.clamp(Vector2.ZERO, Vector2.ONE)),
 		"layer": int(asset.get("default_layer", 0)),
-		"scale": float(asset.get("default_scale", 0.5)),
+		"scale": float(asset.get("default_scale", 0.5 if not is_custom else 1.0)),
+		"flip_h": false,
 	}
+	if is_custom:
+		element["custom_category"] = str(custom_info.get("category", ""))
 	model.elements.append(element)
 	selected_element_id = str(element["id"])
 	selected_actor_id = ""
 	selected_water_id = ""
 	selected_region_id = ""
+	selected_kind = "element"
 	_placing_asset = false
 	_end_cmd()
 	_sync_world()
+	_refresh_hierarchy()
 	_refresh_inspector()
-	_set_status("已放置%s；可拖动脚底锚点继续调整。" % SceneContentController.asset_label(asset_id))
+	_set_status("已放置%s；可拖动脚底锚点继续调整。" % content.asset_label_for(asset_id))
 
 
 func _delete_selected_element() -> void:
@@ -2251,8 +2614,10 @@ func _delete_selected_element() -> void:
 		if str(model.elements[i].get("id", "")) == selected_element_id:
 			model.elements.remove_at(i)
 	selected_element_id = ""
+	selected_kind = "background"
 	_end_cmd()
 	_sync_world()
+	_refresh_hierarchy()
 	_refresh_inspector()
 
 
@@ -2262,8 +2627,10 @@ func _delete_selected_region() -> void:
 		if str(model.background_regions[i].get("id", "")) == selected_region_id:
 			model.background_regions.remove_at(i)
 	selected_region_id = ""
+	selected_kind = "background"
 	_end_cmd()
 	_sync_world()
+	_refresh_hierarchy()
 	_refresh_inspector()
 
 
@@ -2524,6 +2891,9 @@ func _apply_layout() -> void:
 	_top.offset_bottom = TOP_H
 	_bottom.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	_bottom.offset_top = -BOTTOM_H
+	_tools.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	_tools.offset_top = TOP_H
+	_tools.offset_bottom = -BOTTOM_H
 	_drawer_scene_btn.visible = _narrow
 	_drawer_prop_btn.visible = _narrow
 	if _narrow:
@@ -2537,6 +2907,8 @@ func _apply_layout() -> void:
 		_right.offset_top = TOP_H
 		_right.offset_bottom = -BOTTOM_H
 		_right.offset_left = -RIGHT_W
+		_tools.offset_left = LEFT_W if _left_open else 0.0
+		_tools.offset_right = _tools.offset_left + TOOL_W
 	else:
 		_left.visible = true
 		_right.visible = true
@@ -2548,15 +2920,17 @@ func _apply_layout() -> void:
 		_right.offset_top = TOP_H
 		_right.offset_bottom = -BOTTOM_H
 		_right.offset_left = -RIGHT_W
+		_tools.offset_left = LEFT_W
+		_tools.offset_right = LEFT_W + TOOL_W
 	if _canvas_catch:
 		_canvas_catch.set_anchors_preset(Control.PRESET_FULL_RECT)
 		_canvas_catch.offset_top = TOP_H
 		_canvas_catch.offset_bottom = -BOTTOM_H
 		if _narrow:
-			_canvas_catch.offset_left = LEFT_W if _left_open else 0.0
+			_canvas_catch.offset_left = (LEFT_W if _left_open else 0.0) + TOOL_W
 			_canvas_catch.offset_right = -RIGHT_W if _right_open else 0.0
 		else:
-			_canvas_catch.offset_left = LEFT_W
+			_canvas_catch.offset_left = LEFT_W + TOOL_W
 			_canvas_catch.offset_right = -RIGHT_W
 	_update_catcher()
 
@@ -2577,7 +2951,8 @@ func _shortcuts_blocked() -> bool:
 	if _picker and _picker.has_method("is_open") and _picker.is_open():
 		return true
 	if _new_dialog.visible or _rename_dialog.visible or _delete_dialog.visible or _help.visible or _conflict_dialog.visible \
-			or _new_chapter_dialog.visible or _rename_chapter_dialog.visible or _delete_chapter_dialog.visible:
+			or _new_chapter_dialog.visible or _rename_chapter_dialog.visible or _delete_chapter_dialog.visible \
+			or _replace_background_dialog.visible:
 		return true
 	var focus := get_viewport().gui_get_focus_owner()
 	return focus is LineEdit or focus is TextEdit
