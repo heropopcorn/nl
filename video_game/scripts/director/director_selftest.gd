@@ -46,6 +46,12 @@ func _test_layout_v3_assets_and_fields() -> PackedStringArray:
 		errors.append("layout v3 element rotation roundtrip failed")
 	if int(again.water_regions[0].get("layer", -15)) != 7:
 		errors.append("layout v3 water layer roundtrip failed")
+	for preset_id in [DirectorSceneModel.PRESET_PROTAGONIST_VILLAGE, DirectorSceneModel.PRESET_VILLAGE_SCHOOL]:
+		var preset_model := _valid_stub()
+		preset_model.background = {"source": "preset", "preset_id": preset_id, "file": null, "pixel_size": [1536, 1024]}
+		preset_model.validate()
+		if not preset_model.is_valid() or not preset_model.warnings.is_empty():
+			errors.append("built-in background preset rejected: %s" % preset_id)
 	_rm_rf(root)
 	return errors
 

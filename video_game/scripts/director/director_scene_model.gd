@@ -22,6 +22,9 @@ const UV_EPS := 0.000001
 const OVERLAP_EPS := 0.0000001
 const DEFAULT_START_UV := Vector2(0.42, 0.42)
 const PRESET_VILLAGE := "village_default"
+const PRESET_PROTAGONIST_VILLAGE := "protagonist_village"
+const PRESET_VILLAGE_SCHOOL := "village_school"
+const KNOWN_PRESET_BACKGROUNDS := [PRESET_VILLAGE, PRESET_PROTAGONIST_VILLAGE, PRESET_VILLAGE_SCHOOL]
 const PRESET_PIXEL := Vector2i(1152, 864)
 const BLANK_PIXEL := Vector2i(1152, 864)
 const BLANK_FILL := Color(0.45, 0.50, 0.40, 1.0)
@@ -453,7 +456,7 @@ func _validate_background() -> void:
 		var preset_id := str(background.get("preset_id", ""))
 		if preset_id.is_empty():
 			_err("预设背景缺少 preset_id")
-		elif preset_id != PRESET_VILLAGE:
+		elif preset_id not in KNOWN_PRESET_BACKGROUNDS:
 			_warn("未知预设 %s，预览将使用默认村庄" % preset_id)
 	if source == "uploaded":
 		var file_name := str(background.get("file", ""))

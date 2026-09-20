@@ -13,6 +13,22 @@ const LEFT_W := 250.0
 const RIGHT_W := 300.0
 const TOOL_W := 82.0
 const NARROW := 900.0
+const BUILTIN_BACKGROUNDS := [
+	{
+		"id": "background_protagonist_village",
+		"name": "村庄背景",
+		"category": "backgrounds",
+		"preset_id": DirectorSceneModel.PRESET_PROTAGONIST_VILLAGE,
+		"path": "res://art/backgrounds/protagonist_village.png",
+	},
+	{
+		"id": "background_village_school",
+		"name": "村庄学校背景",
+		"category": "backgrounds",
+		"preset_id": DirectorSceneModel.PRESET_VILLAGE_SCHOOL,
+		"path": "res://art/backgrounds/village_school.png",
+	},
+]
 const HELP_TEXT := """导演台 Layout V3
 
 左上 Hierarchy 列出当前场景的一切元素；左下资源列表提供默认/自定义资源；底部 Project 左选章节、右开场景。数据保存在本机 user://director_desk/，不是云存档。
@@ -318,11 +334,33 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("scale/rotate canvas modes should be enabled with an open scene")
 	if (_mode_btns[Mode.LASSO_WATER] as Button).text != "套索水域" or (_mode_btns[Mode.LASSO_REGION] as Button).text != "底图裁片":
 		errors.append("water lasso and background region labels must be explicit")
+	_select_resource_scope("default")
+	_select_asset_category("backgrounds")
+	if _asset_grid.get_child_count() != BUILTIN_BACKGROUNDS.size():
+		errors.append("default background list should contain separate village and school cards")
+	else:
+		for tile in _asset_grid.get_children():
+			var box: Node = null
+			var preview_button: TextureButton = null
+			if tile.get_child_count() > 0:
+				box = tile.get_child(0)
+			if box and box.get_child_count() > 0:
+				preview_button = box.get_child(0) as TextureButton
+			if preview_button == null or preview_button.texture_normal == null:
+				errors.append("default background card missing thumbnail preview")
+				break
+	_select_asset_category("houses")
 	_select_hierarchy("background", "")
 	if selected_kind != "background" or _tab_pages[0].visible == false:
 		errors.append("layout v3 background hierarchy selection failed")
 	if not can_drop_asset(Vector2.ZERO, {"kind": "director_asset", "asset_id": "tree_oak"}):
 		errors.append("canvas should accept library asset drag")
+	for background in BUILTIN_BACKGROUNDS:
+		_apply_builtin_background(background)
+		if str(model.background.get("preset_id", "")) != str(background.get("preset_id", "")):
+			errors.append("built-in background selection did not update preset")
+		if village.terrain_size() != Vector2(1536, 1024) or not village.hide_baked_props:
+			errors.append("built-in background image was not applied cleanly")
 	var first_id := model.scene_id
 	var blank := temp.create_blank_scene("空白测试")
 	if blank == null:
@@ -777,8 +815,8 @@ func _rebuild_asset_drawer() -> void:
 			_asset_grid.add_child(_label("当前分类没有自定义资源。", 12, false, true))
 		return
 	if _asset_category == "backgrounds":
-		_add_resource_tile({"id": "background_village", "name": "村庄背景", "category": "backgrounds"}, false)
-		_add_resource_tile({"id": "background_blank", "name": "空白背景", "category": "backgrounds"}, false)
+		for background in BUILTIN_BACKGROUNDS:
+			_add_resource_tile(background, false)
 		return
 	if _asset_category == "characters":
 		_add_resource_tile({"id": CharacterRegistry.FARMER, "name": "农夫", "category": "characters"}, false)
@@ -792,6 +830,9 @@ func _rebuild_asset_drawer() -> void:
 func _add_resource_tile(asset: Dictionary, custom: bool) -> void:
 	var asset_id := str(asset.get("id", ""))
 	var category := str(asset.get("category", _asset_category))
+	if category == "backgrounds":
+		_add_background_resource_tile(asset, custom)
+		return
 	var tile := _btn(str(asset.get("name", asset_id)), func() -> void: _activate_resource(asset_id, category, custom), 48)
 	tile.tooltip_text = "点击使用此资源"
 	tile.custom_minimum_size.x = 106
@@ -805,6 +846,37 @@ func _add_resource_tile(asset: Dictionary, custom: bool) -> void:
 	tile.expand_icon = true
 	tile.add_theme_constant_override("icon_max_width", 48)
 	_asset_grid.add_child(tile)
+
+
+func _add_background_resource_tile(asset: Dictionary, custom: bool) -> void:
+	var asset_id := str(asset.get("id", ""))
+	var display_name := str(asset.get("name", asset_id))
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(106, 104)
+	panel.tooltip_text = "点击预览图，将场景背景替换为%s" % display_name
+	var content_box := VBoxContainer.new()
+	content_box.add_theme_constant_override("separation", 4)
+	panel.add_child(content_box)
+	var preview := TextureButton.new()
+	preview.custom_minimum_size = Vector2(100, 72)
+	preview.ignore_texture_size = true
+	preview.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
+	preview.tooltip_text = panel.tooltip_text
+	var path := asset_library.texture_path(asset_id) if custom else str(asset.get("path", ""))
+	if custom and not path.is_empty():
+		var image := Image.new()
+		if image.load_png_from_buffer(FileAccess.get_file_as_bytes(path)) == OK:
+			preview.texture_normal = ImageTexture.create_from_image(image)
+	elif ResourceLoader.exists(path):
+		preview.texture_normal = load(path) as Texture2D
+	preview.pressed.connect(func() -> void: _activate_resource(asset_id, "backgrounds", custom))
+	content_box.add_child(preview)
+	var title := _label(display_name, 12, true)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	title.tooltip_text = panel.tooltip_text
+	content_box.add_child(title)
+	_asset_grid.add_child(panel)
 
 
 func _select_tab(index: int) -> void:
@@ -1039,18 +1111,50 @@ func _request_background_replace(action: String) -> void:
 func _confirm_background_replace() -> void:
 	var action := _pending_background_action
 	_pending_background_action = ""
-	if action == "background_village":
-		_begin_cmd()
-		model.background = {"source": "preset", "preset_id": DirectorSceneModel.PRESET_VILLAGE, "file": null, "pixel_size": [DirectorSceneModel.PRESET_PIXEL.x, DirectorSceneModel.PRESET_PIXEL.y]}
-		model.editor["show_baked_props"] = true
-		_end_cmd()
-		_sync_world()
-	elif action == "background_blank":
-		_replace_with_blank()
+	var builtin := _builtin_background_by_id(action)
+	if not builtin.is_empty():
+		_apply_builtin_background(builtin)
 	elif action.begins_with("custom:"):
 		_apply_custom_background(action.trim_prefix("custom:"))
 	_refresh_hierarchy()
 	_refresh_inspector()
+
+
+func _builtin_background_by_id(asset_id: String) -> Dictionary:
+	for background in BUILTIN_BACKGROUNDS:
+		if str(background.get("id", "")) == asset_id:
+			return background
+	return {}
+
+
+func _builtin_background_by_preset(preset_id: String) -> Dictionary:
+	for background in BUILTIN_BACKGROUNDS:
+		if str(background.get("preset_id", "")) == preset_id:
+			return background
+	return {}
+
+
+func _apply_builtin_background(background: Dictionary) -> void:
+	var path := str(background.get("path", ""))
+	var texture: Texture2D = null
+	if ResourceLoader.exists(path):
+		texture = load(path) as Texture2D
+	if texture == null:
+		_set_status("找不到默认背景资源。")
+		return
+	var size := texture.get_size()
+	_begin_cmd()
+	model.background = {
+		"source": "preset",
+		"preset_id": str(background.get("preset_id", DirectorSceneModel.PRESET_VILLAGE)),
+		"file": null,
+		"pixel_size": [int(size.x), int(size.y)],
+	}
+	# 两张新背景已经包含建筑，不能再叠加旧村庄的内置道具。
+	model.editor["show_baked_props"] = false
+	_end_cmd()
+	_sync_world()
+	_set_status("已替换为%s。" % str(background.get("name", "默认背景")))
 
 
 func _apply_custom_background(asset_id: String) -> void:
@@ -1547,6 +1651,16 @@ func _apply_background() -> void:
 	var source := str(model.background.get("source", "preset"))
 	var show_props := bool(model.editor.get("show_baked_props", source == "preset"))
 	if source == "preset":
+		var preset := _builtin_background_by_preset(str(model.background.get("preset_id", "")))
+		if not preset.is_empty():
+			var path := str(preset.get("path", ""))
+			var texture: Texture2D = null
+			if ResourceLoader.exists(path):
+				texture = load(path) as Texture2D
+			if texture:
+				village.apply_director_image(texture.get_image(), true)
+				return
+			_set_status("找不到默认背景文件，已使用旧版村庄。")
 		village.load_approved_ground(not show_props)
 		return
 	var file_name := str(model.background.get("file", "background.png"))
