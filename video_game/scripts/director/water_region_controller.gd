@@ -3,7 +3,7 @@ extends Node2D
 
 ## Independent rectangle/polygon water surfaces. One ShaderMaterial per region.
 
-const WATER_COLOR := Color(92.0 / 255.0, 168.0 / 255.0, 210.0 / 255.0, 0.72)
+const WATER_COLOR := Color(92.0 / 255.0, 168.0 / 255.0, 210.0 / 255.0, 1.0)
 
 var village: VillageSandbox
 var _shader: Shader
@@ -59,6 +59,13 @@ func material_flow_speed(region_id: String) -> float:
 	if mat == null:
 		return -1.0
 	return float(mat.get_shader_parameter("flow_speed"))
+
+
+func material_current_strength(region_id: String) -> float:
+	if not _items.has(region_id):
+		return -1.0
+	var mat: ShaderMaterial = _items[region_id].get("material")
+	return float(mat.get_shader_parameter("current_strength")) if mat else -1.0
 
 
 func hit_region(world_pos: Vector2, model: DirectorSceneModel) -> String:
@@ -123,7 +130,11 @@ func _spawn(model: DirectorSceneModel, region: Dictionary, global_collision: boo
 	)
 	mat.set_shader_parameter("flow_dir", flow)
 	mat.set_shader_parameter("flow_speed", float(region.get("flow_speed", 0.22)))
-	mat.set_shader_parameter("tint", Color(0.42, 0.76, 0.92, 0.50))
+	mat.set_shader_parameter("region_size", rect.size)
+	mat.set_shader_parameter("current_strength", 0.95)
+	mat.set_shader_parameter("surface_mist", 0.08)
+	mat.set_shader_parameter("refraction_strength", 0.32)
+	mat.set_shader_parameter("tint", Color(0.32, 0.68, 0.90, 0.60))
 	mat.set_shader_parameter("director_time", director_time)
 	surface.material = mat
 	add_child(surface)

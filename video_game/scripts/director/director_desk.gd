@@ -381,6 +381,8 @@ func run_runtime_selftest() -> PackedStringArray:
 	var dir_b := water.material_flow_dir("water_b")
 	if dir_a.dot(Vector2(0, 1)) < 0.9 or dir_b.dot(Vector2(1, 0)) < 0.9:
 		errors.append("water materials not isolated at create")
+	if water.material_current_strength("water_a") < 0.9 or water.material_current_strength("water_b") < 0.9:
+		errors.append("water current streak layer should be visibly enabled")
 	_begin_cmd()
 	_set_water_flow("water_a", Vector2(-1, 0))
 	_end_cmd()

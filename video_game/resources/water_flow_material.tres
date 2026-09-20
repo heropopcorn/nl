@@ -5,5 +5,9 @@
 [resource]
 shader = ExtResource("1_shader")
 shader_parameter/flow_speed = 0.22
-shader_parameter/tint = Color(0.42, 0.76, 0.92, 0.5)
+shader_parameter/tint = Color(0.32, 0.68, 0.9, 0.6)
 shader_parameter/flow_dir = Vector2(0.18, 0.92)
+shader_parameter/region_size = Vector2(1152, 864)
+shader_parameter/current_strength = 0.95
+shader_parameter/surface_mist = 0.08
+shader_parameter/refraction_strength = 0.32
