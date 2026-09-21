@@ -551,6 +551,18 @@ func run_runtime_selftest() -> PackedStringArray:
 	weather.apply(model)
 	if not weather.is_raining():
 		errors.append("rain was not enabled")
+	if not weather.has_visible_effect():
+		errors.append("rain overlay was not shown")
+	if absf(weather.applied_intensity() - 0.9) > 0.001:
+		errors.append("rain intensity was not applied")
+	model.weather["enabled"] = false
+	weather.apply(model)
+	if weather.is_raining() or weather.has_visible_effect():
+		errors.append("disabling rain should hide overlay")
+	model.weather["enabled"] = true
+	weather.apply(model)
+	if not weather.is_raining() or not weather.has_visible_effect():
+		errors.append("re-enabling rain should show overlay")
 	# undo 50
 	var before := model.to_dict()
 	var canonical_before := DirectorSceneModel.from_dict(before).to_dict()
@@ -1222,6 +1234,7 @@ func _process(delta: float) -> void:
 		water.set_director_time(preview.director_time)
 	if weather:
 		weather.set_paused(preview.is_paused())
+		weather.set_director_time(preview.director_time)
 	if _transport_label:
 		_transport_label.text = preview.status_text()
 	if _play_btn:
