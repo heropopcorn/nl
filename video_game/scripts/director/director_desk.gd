@@ -563,6 +563,10 @@ func run_runtime_selftest() -> PackedStringArray:
 	weather.apply(model)
 	if not weather.is_raining() or not weather.has_visible_effect():
 		errors.append("re-enabling rain should show overlay")
+	if DisplayServer.get_name() != "headless":
+		weather.set_director_time(1.35)
+		await village._await_render()
+		village._save_screenshot("director_desk_rain.png")
 	# undo 50
 	var before := model.to_dict()
 	var canonical_before := DirectorSceneModel.from_dict(before).to_dict()
