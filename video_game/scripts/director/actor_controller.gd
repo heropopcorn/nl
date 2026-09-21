@@ -11,6 +11,14 @@ var _extra_players: Array[VillagePlayer] = []
 
 func rebuild(village: VillageSandbox, model: DirectorSceneModel, reset_positions: bool) -> void:
 	_village = village
+	# Inspector edits rebuild visual/collision helpers frequently. Keep every
+	# runtime actor where the editor left it unless this is an actual scene load.
+	var previous_positions: Dictionary = {}
+	if not reset_positions:
+		for actor_id in _players:
+			var previous := _players[actor_id] as VillagePlayer
+			if is_instance_valid(previous):
+				previous_positions[str(actor_id)] = previous.position
 	_clear_extras()
 	_players.clear()
 	if village == null or model == null or model.actors.is_empty():
@@ -41,7 +49,9 @@ func rebuild(village: VillageSandbox, model: DirectorSceneModel, reset_positions
 		_players[aid] = player
 		apply_appearance(player, str(actor.get("character_id", CharacterRegistry.FARMER)))
 		player.z_index = int(actor.get("layer", 0))
-		if reset_positions or not player.is_playing_path():
+		if not reset_positions and previous_positions.has(aid):
+			player.position = previous_positions[aid]
+		else:
 			player.position = village.uv_to_world(DirectorSceneModel._vec2(actor.get("start_uv", [0.42, 0.42]), DirectorSceneModel.DEFAULT_START_UV))
 		runtime_index += 1
 	if runtime_index == 0:

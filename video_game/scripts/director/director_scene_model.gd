@@ -55,7 +55,9 @@ const KNOWN_ACTOR_KEYS := [
 const KNOWN_ROUTE_KEYS := ["points_uv", "speed_px_per_sec", "loop", "collision_mode", "visible"]
 const KNOWN_ELEMENT_KEYS := ["id", "asset_id", "display_name", "enabled", "position_uv", "layer", "scale", "rotation_degrees", "flip_h"]
 const KNOWN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "layer"]
-const KNOWN_WEATHER_KEYS := ["enabled", "type", "intensity"]
+const KNOWN_WEATHER_KEYS := [
+	"enabled", "type", "intensity", "time_of_day", "moonlight_enabled", "moonlight_intensity",
+]
 
 static var _scene_id_re: RegEx
 static var _rfc3339_re: RegEx
@@ -129,6 +131,9 @@ static func default_weather() -> Dictionary:
 		"enabled": false,
 		"type": "rain",
 		"intensity": 0.6,
+		"time_of_day": "noon",
+		"moonlight_enabled": true,
+		"moonlight_intensity": 0.65,
 	}
 
 
@@ -284,6 +289,9 @@ func to_dict() -> Dictionary:
 		"enabled": bool(weather.get("enabled", false)),
 		"type": str(weather.get("type", "rain")),
 		"intensity": snap6(float(weather.get("intensity", 0.6))),
+		"time_of_day": str(weather.get("time_of_day", "noon")),
+		"moonlight_enabled": bool(weather.get("moonlight_enabled", true)),
+		"moonlight_intensity": snap6(float(weather.get("moonlight_intensity", 0.65))),
 	})
 	if camera != null:
 		out["camera"] = camera
@@ -573,6 +581,11 @@ func _validate_weather() -> void:
 	var wtype := str(weather.get("type", "rain"))
 	if wtype != "rain":
 		_warn("未知天气类型，已忽略执行")
+	if str(weather.get("time_of_day", "noon")) not in ["morning", "noon", "evening", "night"]:
+		_err("时段必须为早晨、中午、傍晚或夜晚")
+	var moonlight := float(weather.get("moonlight_intensity", 0.65))
+	if moonlight < 0.0 or moonlight > 1.0:
+		_err("月光强度须在 0 到 1 之间")
 
 
 func _parse_background(value: Variant) -> Dictionary:
@@ -725,6 +738,9 @@ func _parse_weather(value: Variant) -> Dictionary:
 	out["enabled"] = bool(data.get("enabled", false))
 	out["type"] = str(data.get("type", "rain"))
 	out["intensity"] = clampf(float(data.get("intensity", 0.6)), 0.0, 1.0)
+	out["time_of_day"] = str(data.get("time_of_day", "noon"))
+	out["moonlight_enabled"] = bool(data.get("moonlight_enabled", true))
+	out["moonlight_intensity"] = clampf(float(data.get("moonlight_intensity", 0.65)), 0.0, 1.0)
 	return out
 
 
