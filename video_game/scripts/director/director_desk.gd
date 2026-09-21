@@ -37,13 +37,15 @@ const HELP_TEXT := """导演台 Layout V3
 
 “矩形水域”拖出规则水面；“套索水域”逐点创建不规则水面；“底图裁片”圈出可独立设置层级的背景区域。双击、回点或 Enter 闭合套索，创建后工具会保持激活，可按 Esc 回到移动。
 
-移动、缩放、旋转用于图片元素。先选工具，再在画布上按住元素拖动；缩放按离中心的距离改变大小，旋转绕元素脚底锚点改变角度。右侧属性也可精确输入。
+移动、缩放、旋转采用图像软件习惯：移动保留抓取点；缩放拖四角控制点；旋转拖外圈，Shift 吸附 15°。V 切回移动，Ctrl/Cmd+T 进入缩放，方向键微调。右侧属性也可精确输入。
 
 角色：可添加多人；必须先点选角色，才显示和编辑其路线。每人可独立设置层级、速度、路线显隐与循环，播放时同时行走。
 
-天气：仅下雨，强度只影响画面。
+环境：可设置早晨、中午、傍晚、夜晚和夜间月光；下雨强度只影响画面。
 
 顶栏文件/编辑菜单用于创建和维护内容；播放/停止控制当前场景，播放时编辑锁定。
+
+中键按住可随时平移画布，滚轮以鼠标位置缩放，不会取消正在进行的操作。
 
 Space 播放或暂停，Esc 取消或停止，Ctrl+S 保存，Ctrl+Z 撤销。"""
 
@@ -97,6 +99,8 @@ var _transform_start_distance := 1.0
 var _transform_start_scale := 1.0
 var _transform_start_pointer_angle := 0.0
 var _transform_start_rotation := 0.0
+var _drag_world_offset := Vector2.ZERO
+var _canvas_panning := false
 
 var _save_timer: Timer
 var _picker: Node
@@ -114,6 +118,7 @@ var _search_edit: LineEdit
 var _scene_box: Container
 var _chapter_box: VBoxContainer
 var _hierarchy_box: VBoxContainer
+var _hierarchy_rename_btn: Button
 var _inspector_title: Label
 var _tabs: Control
 var _asset_drawer: PanelContainer
@@ -152,6 +157,10 @@ var _delete_chapter_dialog: ConfirmationDialog
 var _delete_chapter_id := ""
 var _replace_background_dialog: ConfirmationDialog
 var _pending_background_action := ""
+var _rename_item_dialog: ConfirmationDialog
+var _rename_item_edit: LineEdit
+var _rename_item_kind := ""
+var _rename_item_id := ""
 
 
 func setup(host: VillageSandbox) -> void:
@@ -334,6 +343,18 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("scale/rotate canvas modes should be enabled with an open scene")
 	if (_mode_btns[Mode.LASSO_WATER] as Button).text != "套索水域" or (_mode_btns[Mode.LASSO_REGION] as Button).text != "底图裁片":
 		errors.append("water lasso and background region labels must be explicit")
+	# Middle-button panning is an independent temporary gesture and must leave
+	# an in-progress editor drag untouched.
+	_drag = DragKind.BOX
+	_canvas_panning = true
+	var pan_before := village.camera.offset
+	var pan_event := InputEventMouseMotion.new()
+	pan_event.relative = Vector2(24.0, -12.0)
+	_input(pan_event)
+	if _drag != DragKind.BOX or village.camera.offset.distance_to(pan_before - pan_event.relative / village.camera.zoom.x) > 0.1:
+		errors.append("middle-button pan interrupted active editor operation")
+	_canvas_panning = false
+	_drag = DragKind.NONE
 	_select_resource_scope("default")
 	_select_asset_category("backgrounds")
 	if _asset_grid.get_child_count() != BUILTIN_BACKGROUNDS.size():
@@ -377,6 +398,14 @@ func run_runtime_selftest() -> PackedStringArray:
 	_add_water(Rect2(0.28, 0.20, 0.18, 0.16), Vector2(1, 0), "water_b")
 	_end_cmd()
 	_sync_world()
+	selected_kind = "water"
+	selected_water_id = "water_a"
+	_rename_item_kind = "water"
+	_rename_item_id = "water_a"
+	_rename_item_edit.text = "村口小河"
+	_confirm_item_rename()
+	if str(_water_by_id("water_a").get("name", "")) != "村口小河":
+		errors.append("Hierarchy element rename failed")
 	var dir_a := water.material_flow_dir("water_a")
 	var dir_b := water.material_flow_dir("water_b")
 	if dir_a.dot(Vector2(0, 1)) < 0.9 or dir_b.dot(Vector2(1, 0)) < 0.9:
@@ -408,8 +437,21 @@ func run_runtime_selftest() -> PackedStringArray:
 	_end_cmd()
 	if model.has_water_overlap():
 		errors.append("shared-edge pair became overlap after removing third")
+	# Routine Inspector updates must not recenter the canvas or respawn actors.
+	var preserved_actor_id := str(model.actors[0].get("id", "")) if not model.actors.is_empty() else ""
+	var preserved_player := actors.player_for(preserved_actor_id)
+	village.camera.offset = Vector2(137.0, -83.0)
+	village.camera.zoom = Vector2(1.72, 1.72)
+	if preserved_player:
+		preserved_player.position += Vector2(31.0, 19.0)
+	var preserved_actor_position := preserved_player.position if preserved_player else Vector2.ZERO
 	model.editor["water_collision_enabled"] = false
 	_sync_world()
+	if village.camera.offset.distance_to(Vector2(137.0, -83.0)) > 0.1 or absf(village.camera.zoom.x - 1.72) > 0.001:
+		errors.append("Inspector update recentered camera view")
+	preserved_player = actors.player_for(preserved_actor_id)
+	if preserved_player and preserved_player.position.distance_to(preserved_actor_position) > 0.1:
+		errors.append("Inspector update reset actor position")
 	if water.get_child_count() < 2:
 		errors.append("water sprites should remain with collision off")
 	var bodies := 0
@@ -469,24 +511,27 @@ func run_runtime_selftest() -> PackedStringArray:
 	selected_kind = "element"
 	var transform_corners := content.element_world_corners("element_low")
 	if transform_corners.size() == 4:
-		var inside := (transform_corners[0] + transform_corners[1] + transform_corners[2] + transform_corners[3]) * 0.25
 		_set_mode(Mode.SCALE)
-		_begin_element_transform(inside)
+		var scale_handle := transform_corners[2]
+		_begin_element_transform(scale_handle)
 		var pivot := content.element_world_position("element_low")
 		var scale_before := float(_element_by_id("element_low").get("scale", 0.0))
-		_drag_scale_element(pivot + (inside - pivot) * 1.5)
+		_drag_scale_element(pivot + (scale_handle - pivot) * 1.5)
 		if float(_element_by_id("element_low").get("scale", 0.0)) <= scale_before:
 			errors.append("canvas scale drag did not enlarge element")
 		_end_cmd()
 		_drag = DragKind.NONE
 		_sync_world()
 		transform_corners = content.element_world_corners("element_low")
-		inside = (transform_corners[0] + transform_corners[1] + transform_corners[2] + transform_corners[3]) * 0.25
 		_set_mode(Mode.ROTATE)
-		_begin_element_transform(inside)
 		pivot = content.element_world_position("element_low")
+		var radius := 0.0
+		for corner in transform_corners:
+			radius = maxf(radius, pivot.distance_to(corner))
+		var rotate_handle := pivot + Vector2.RIGHT * (radius + HANDLE * 2.0 / village.camera.zoom.x)
+		_begin_element_transform(rotate_handle)
 		var rotation_before := float(_element_by_id("element_low").get("rotation_degrees", 0.0))
-		_drag_rotate_element(pivot + (inside - pivot).rotated(PI * 0.25))
+		_drag_rotate_element((rotate_handle - pivot).rotated(PI * 0.25) + pivot)
 		if absf(float(_element_by_id("element_low").get("rotation_degrees", 0.0)) - rotation_before) < 20.0:
 			errors.append("canvas rotation drag did not rotate element")
 		_end_cmd()
@@ -547,6 +592,9 @@ func run_runtime_selftest() -> PackedStringArray:
 	model.weather["enabled"] = true
 	model.weather["type"] = "rain"
 	model.weather["intensity"] = 0.9
+	model.weather["time_of_day"] = "night"
+	model.weather["moonlight_enabled"] = true
+	model.weather["moonlight_intensity"] = 0.72
 	_end_cmd()
 	weather.apply(model)
 	if not weather.is_raining():
@@ -555,6 +603,14 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("rain overlay was not shown")
 	if absf(weather.applied_intensity() - 0.9) > 0.001:
 		errors.append("rain intensity was not applied")
+	if weather.applied_time_of_day() != "night" or absf(weather.applied_moonlight() - 0.72) > 0.001:
+		errors.append("night moonlight was not applied")
+	var rain_overlay := weather.get_node_or_null("RainOverlay") as ColorRect
+	if rain_overlay == null or rain_overlay.size.x < 100.0 or rain_overlay.size.y < 100.0:
+		errors.append("rain overlay did not cover viewport")
+	var day_overlay := weather.get_node_or_null("DayCycleOverlay") as ColorRect
+	if day_overlay == null or not day_overlay.visible:
+		errors.append("night colour grade was not visible")
 	model.weather["enabled"] = false
 	weather.apply(model)
 	if weather.is_raining() or weather.has_visible_effect():
@@ -730,6 +786,9 @@ func _fill_left() -> void:
 	hierarchy_add.get_popup().add_item("底图裁片区域", 3)
 	hierarchy_add.get_popup().id_pressed.connect(_on_hierarchy_add)
 	hierarchy_header.add_child(hierarchy_add)
+	_hierarchy_rename_btn = _btn("重命名", _open_selected_item_rename)
+	_hierarchy_rename_btn.tooltip_text = "重命名选中的元素；也可双击元素名称"
+	hierarchy_header.add_child(_hierarchy_rename_btn)
 	box.add_child(hierarchy_header)
 	var hierarchy_scroll := ScrollContainer.new()
 	hierarchy_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -948,15 +1007,16 @@ func _fill_tools() -> void:
 	col.add_theme_constant_override("separation", 6)
 	_tools.add_child(col)
 	col.add_child(_label("工具", 13, true))
-	_mode_btns[Mode.SELECT] = _btn("移动", func() -> void: _set_mode(Mode.SELECT), 38)
+	_mode_btns[Mode.SELECT] = _btn("移动 V", func() -> void: _set_mode(Mode.SELECT), 38)
 	_mode_btns[Mode.SCALE] = _btn("缩放", func() -> void: _set_mode(Mode.SCALE), 38)
 	_mode_btns[Mode.ROTATE] = _btn("旋转", func() -> void: _set_mode(Mode.ROTATE), 38)
 	_mode_btns[Mode.BOX_WATER] = _btn("矩形水域", func() -> void: _set_mode(Mode.BOX_WATER), 38)
 	_mode_btns[Mode.LASSO_WATER] = _btn("套索水域", func() -> void: _set_mode(Mode.LASSO_WATER), 38)
 	_mode_btns[Mode.LASSO_REGION] = _btn("底图裁片", func() -> void: _set_mode(Mode.LASSO_REGION), 38)
 	_mode_btns[Mode.EDIT_ROUTE] = _btn("路线", func() -> void: _set_mode(Mode.EDIT_ROUTE), 38)
-	(_mode_btns[Mode.SCALE] as Button).tooltip_text = "拖动图片元素，按离脚底锚点的距离缩放"
-	(_mode_btns[Mode.ROTATE] as Button).tooltip_text = "拖动图片元素，绕脚底锚点旋转"
+	(_mode_btns[Mode.SELECT] as Button).tooltip_text = "V：点选并拖动；方向键微调，Shift+方向键移动 10 像素"
+	(_mode_btns[Mode.SCALE] as Button).tooltip_text = "Ctrl/Cmd+T：选中图片元素后拖动四角控制点等比缩放"
+	(_mode_btns[Mode.ROTATE] as Button).tooltip_text = "选中图片元素后拖动外圈旋转；Shift 吸附 15°"
 	(_mode_btns[Mode.BOX_WATER] as Button).tooltip_text = "拖出矩形水域"
 	(_mode_btns[Mode.LASSO_WATER] as Button).tooltip_text = "逐点圈出不规则水域"
 	(_mode_btns[Mode.LASSO_REGION] as Button).tooltip_text = "逐点圈出可单独设置层级的背景区域，不会创建水域"
@@ -1056,6 +1116,15 @@ func _build_dialogs() -> void:
 	_replace_background_dialog.cancel_button_text = "取消"
 	_replace_background_dialog.confirmed.connect(_confirm_background_replace)
 	add_child(_replace_background_dialog)
+	_rename_item_dialog = ConfirmationDialog.new()
+	_rename_item_dialog.title = "重命名元素"
+	_rename_item_dialog.ok_button_text = "确定"
+	_rename_item_dialog.cancel_button_text = "取消"
+	_rename_item_edit = LineEdit.new()
+	_rename_item_edit.max_length = DirectorSceneModel.NAME_MAX
+	_rename_item_dialog.add_child(_rename_item_edit)
+	_rename_item_dialog.confirmed.connect(_confirm_item_rename)
+	add_child(_rename_item_dialog)
 
 
 func _on_file_menu(id: int) -> void:
@@ -1256,6 +1325,27 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var mouse_button := event as InputEventMouseButton
+		if mouse_button.button_index == MOUSE_BUTTON_MIDDLE:
+			if mouse_button.pressed:
+				_canvas_panning = not _shortcuts_blocked() and _pointer_over_canvas(mouse_button.position)
+			elif _canvas_panning:
+				_canvas_panning = false
+			if _canvas_panning or not mouse_button.pressed:
+				get_viewport().set_input_as_handled()
+			return
+		if mouse_button.pressed and mouse_button.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN] \
+				and not _shortcuts_blocked() and _pointer_over_canvas(mouse_button.position):
+			var amount: float = village.camera.zoom_step if mouse_button.button_index == MOUSE_BUTTON_WHEEL_UP else -village.camera.zoom_step
+			village.camera.zoom_at_screen_position(amount, mouse_button.position)
+			get_viewport().set_input_as_handled()
+			return
+	if event is InputEventMouseMotion and _canvas_panning:
+		var motion := event as InputEventMouseMotion
+		village.camera.offset -= motion.relative / maxf(village.camera.zoom.x, 0.001)
+		get_viewport().set_input_as_handled()
+		return
 	if _drag == DragKind.NONE:
 		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
@@ -1292,6 +1382,18 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 		if cmd and key == KEY_Y:
 			_redo()
+			get_viewport().set_input_as_handled()
+			return
+		if cmd and key == KEY_T:
+			_set_mode(Mode.SCALE)
+			get_viewport().set_input_as_handled()
+			return
+		if not cmd and key == KEY_V:
+			_set_mode(Mode.SELECT)
+			get_viewport().set_input_as_handled()
+			return
+		if key in [KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN] and selected_kind == "element":
+			_nudge_selected_element(key, 10 if key_event.shift_pressed else 1)
 			get_viewport().set_input_as_handled()
 			return
 		if key == KEY_SPACE:
@@ -1425,6 +1527,8 @@ func _click_select(world: Vector2) -> void:
 		selected_region_id = ""
 		_begin_cmd()
 		_drag = DragKind.ROUTE_POINT
+		var hit_player := actors.player_for(hit_actor_id)
+		_drag_world_offset = hit_player.position - world if hit_player else Vector2.ZERO
 		_select_tab(2)
 		_refresh_inspector()
 		_refresh_hierarchy()
@@ -1446,6 +1550,7 @@ func _click_select(world: Vector2) -> void:
 		selected_region_id = ""
 		_begin_cmd()
 		_drag = DragKind.ELEMENT_MOVE
+		_drag_world_offset = content.element_world_position(element_id) - world
 		_select_tab(0)
 		_refresh_inspector()
 		_refresh_hierarchy()
@@ -1475,6 +1580,7 @@ func _click_select(world: Vector2) -> void:
 				_drag_corner = corner
 			else:
 				_drag = DragKind.WATER_MOVE
+				_drag_world_offset = rect.position + rect.size * 0.5 - world
 		_refresh_inspector()
 		_refresh_hierarchy()
 		return
@@ -1590,7 +1696,7 @@ func _finish_lasso() -> void:
 	if mode == Mode.LASSO_WATER:
 		var water_id := DirectorSceneModel.new_hex_id("water_", 4)
 		model.water_regions.append({
-			"id": water_id, "name": "套索水域", "enabled": true, "shape": "polygon",
+			"id": water_id, "name": "套索水域 %d" % (model.water_regions.size() + 1), "enabled": true, "shape": "polygon",
 			"points_uv": points, "rect_uv": [0, 0, 0, 0], "flow_dir": [0, 1],
 			"flow_speed": 0.22, "collision_enabled": true, "layer": -15,
 		})
@@ -1601,7 +1707,7 @@ func _finish_lasso() -> void:
 	else:
 		var region_id := DirectorSceneModel.new_hex_id("region_", 4)
 		model.background_regions.append({
-			"id": region_id, "name": "底图区域", "enabled": true, "points_uv": points, "layer": 1,
+			"id": region_id, "name": "底图区域 %d" % (model.background_regions.size() + 1), "enabled": true, "points_uv": points, "layer": 1,
 		})
 		selected_region_id = region_id
 		selected_kind = "background_region"
@@ -1636,7 +1742,7 @@ func _apply_loaded_model(loaded: DirectorSceneModel) -> void:
 	preview.state = PreviewController.State.STOPPED
 	preview.entered_preview = false
 	actors.stop_all("replace")
-	_sync_world()
+	_sync_world(true)
 	_loading = false
 	_set_save_status("saved")
 	_refresh_all()
@@ -1647,7 +1753,7 @@ func _apply_loaded_model(loaded: DirectorSceneModel) -> void:
 		_set_status("找不到角色，已显示默认占位")
 
 
-func _sync_world() -> void:
+func _sync_world(reset_editor_view: bool = false) -> void:
 	if model == null:
 		village.hide_legacy_water()
 		water.rebuild(null)
@@ -1657,11 +1763,16 @@ func _sync_world() -> void:
 		_empty_label.visible = true
 		return
 	_empty_label.visible = false
+	var camera_offset := village.camera.offset if village.camera else Vector2.ZERO
+	var camera_zoom := village.camera.zoom if village.camera else Vector2.ONE
 	_apply_background()
 	content.rebuild(model)
 	water.rebuild(model)
 	_apply_legacy()
-	actors.rebuild(village, model, preview.is_stopped())
+	actors.rebuild(village, model, reset_editor_view)
+	if village.camera and not reset_editor_view:
+		village.camera.offset = camera_offset
+		village.camera.zoom = camera_zoom
 	weather.apply(model)
 	_refresh_mode_buttons()
 
@@ -1766,6 +1877,8 @@ func _refresh_scene_list() -> void:
 func _refresh_hierarchy() -> void:
 	if _hierarchy_box == null:
 		return
+	if _hierarchy_rename_btn:
+		_hierarchy_rename_btn.disabled = model == null or selected_kind not in ["scene", "element", "actor", "water", "background_region"]
 	for child in _hierarchy_box.get_children():
 		_hierarchy_box.remove_child(child)
 		child.free()
@@ -1782,12 +1895,17 @@ func _refresh_hierarchy() -> void:
 		_hierarchy_box.add_child(_hierarchy_button("  角色 · " + str(actor.get("display_name", "角色")), "actor", str(actor.get("id", ""))))
 	for region in model.water_regions:
 		_hierarchy_box.add_child(_hierarchy_button("  水流 · " + str(region.get("name", "水域")), "water", str(region.get("id", ""))))
-	_hierarchy_box.add_child(_hierarchy_button("  特效 · 下雨", "weather", "weather"))
+	_hierarchy_box.add_child(_hierarchy_button("  特效 · 环境与下雨", "weather", "weather"))
 
 
 func _hierarchy_button(label_text: String, kind: String, id: String) -> Button:
 	var button := _btn(label_text, func() -> void: _select_hierarchy(kind, id))
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	button.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed and event.double_click:
+			_select_hierarchy(kind, id)
+			_open_selected_item_rename()
+	)
 	var selected := selected_kind == kind
 	if kind == "element": selected = selected and selected_element_id == id
 	elif kind == "actor": selected = selected and selected_actor_id == id
@@ -1811,6 +1929,52 @@ func _select_hierarchy(kind: String, id: String) -> void:
 		_: _select_tab(0)
 	_refresh_hierarchy()
 	_refresh_inspector()
+
+
+func _open_selected_item_rename() -> void:
+	if model == null:
+		return
+	if selected_kind == "scene":
+		_open_rename(model.scene_id, model.name)
+		return
+	var current := ""
+	match selected_kind:
+		"element": current = str(_element_by_id(selected_element_id).get("display_name", "元素"))
+		"actor": current = str(actors.actor_by_id(model, selected_actor_id).get("display_name", "角色"))
+		"water": current = str(_water_by_id(selected_water_id).get("name", "水域"))
+		"background_region": current = str(_background_region_by_id(selected_region_id).get("name", "底图区域"))
+		_: return
+	_rename_item_kind = selected_kind
+	_rename_item_id = selected_element_id if selected_kind == "element" else selected_actor_id if selected_kind == "actor" else selected_water_id if selected_kind == "water" else selected_region_id
+	_rename_item_edit.text = current
+	_rename_item_dialog.popup_centered()
+	_rename_item_edit.select_all()
+	_rename_item_edit.grab_focus()
+
+
+func _confirm_item_rename() -> void:
+	var next_name := _rename_item_edit.text.strip_edges()
+	if next_name.length() < DirectorSceneModel.NAME_MIN or next_name.length() > DirectorSceneModel.NAME_MAX:
+		_set_status("元素名称须为 1–40 个字符。")
+		return
+	_begin_cmd()
+	match _rename_item_kind:
+		"element":
+			var element := _element_by_id(_rename_item_id)
+			if not element.is_empty(): element["display_name"] = next_name
+		"actor":
+			var actor := actors.actor_by_id(model, _rename_item_id)
+			if not actor.is_empty(): actor["display_name"] = next_name
+		"water":
+			var region := _water_by_id(_rename_item_id)
+			if not region.is_empty(): region["name"] = next_name
+		"background_region":
+			var bg_region := _background_region_by_id(_rename_item_id)
+			if not bg_region.is_empty(): bg_region["name"] = next_name
+	_end_cmd()
+	_refresh_hierarchy()
+	_refresh_inspector()
+	_set_status("已重命名为「%s」。" % next_name)
 
 
 func _chapter_card(chapter: Dictionary) -> PanelContainer:
@@ -2228,9 +2392,46 @@ func _fill_weather_tab() -> void:
 	if inner == null:
 		return
 	_clear_inner(inner)
-	inner.add_child(_label("天气", 14, true))
+	inner.add_child(_label("环境与天气", 14, true))
 	if model == null:
 		return
+	inner.add_child(_label("时段", 13, true))
+	var time_select := OptionButton.new()
+	var times := [["早晨", "morning"], ["中午", "noon"], ["傍晚", "evening"], ["夜晚", "night"]]
+	var current_time := str(model.weather.get("time_of_day", "noon"))
+	for i in range(times.size()):
+		time_select.add_item(str(times[i][0]), i)
+		time_select.set_item_metadata(i, times[i][1])
+		if str(times[i][1]) == current_time:
+			time_select.select(i)
+	time_select.item_selected.connect(func(index: int) -> void:
+		if _loading: return
+		_begin_cmd()
+		model.weather["time_of_day"] = str(time_select.get_item_metadata(index))
+		_end_cmd()
+		weather.apply(model)
+	)
+	inner.add_child(time_select)
+	inner.add_child(_checkbox("夜晚启用月光", bool(model.weather.get("moonlight_enabled", true)), func(v: bool) -> void:
+		if _loading: return
+		_begin_cmd(); model.weather["moonlight_enabled"] = v; _end_cmd()
+		weather.apply(model)
+	))
+	inner.add_child(_label("月光强度（仅夜晚生效）", 12, false))
+	var moon := HSlider.new()
+	moon.min_value = 0.0
+	moon.max_value = 1.0
+	moon.step = 0.01
+	moon.value = float(model.weather.get("moonlight_intensity", 0.65))
+	moon.drag_started.connect(_begin_cmd)
+	moon.value_changed.connect(func(v: float) -> void:
+		if _loading: return
+		model.weather["moonlight_intensity"] = v
+		weather.apply(model)
+	)
+	moon.drag_ended.connect(func(_changed: bool) -> void: _end_cmd())
+	inner.add_child(moon)
+	inner.add_child(HSeparator.new())
 	inner.add_child(_checkbox("启用天气", bool(model.weather.get("enabled", false)), func(v: bool) -> void:
 		if _loading: return
 		_begin_cmd()
@@ -2238,8 +2439,8 @@ func _fill_weather_tab() -> void:
 		_end_cmd()
 		weather.apply(model)
 	))
-	inner.add_child(_label("天气效果：下雨", 13, false))
-	inner.add_child(_label("范围：当前为全屏。雾气和多范围特效将在后续版本开放。", 12, false, true))
+	inner.add_child(_label("天气效果：下雨（全屏）", 13, false))
+	inner.add_child(_label("雨线覆盖编辑画面；关闭天气不影响所选时段。", 12, false, true))
 	inner.add_child(_label("强度", 13, true))
 	var sl := HSlider.new()
 	sl.min_value = 0
@@ -2288,7 +2489,7 @@ func _set_mode(next: Mode) -> void:
 	_update_catcher()
 	match mode:
 		Mode.SELECT:
-			_set_status("选择：左键选对象，右键拖动画布。")
+			_set_status("移动 V：左键选中并拖动；中键拖动画布，滚轮以鼠标位置缩放。")
 		Mode.BOX_WATER:
 			_set_status("框选水域：拖出矩形，或在对角再点一次结束。")
 		Mode.LASSO_WATER:
@@ -2300,9 +2501,9 @@ func _set_mode(next: Mode) -> void:
 		Mode.EDIT_ROUTE:
 			_set_status("编辑路线：左键加点，Backspace 删末点。")
 		Mode.SCALE:
-			_set_status("缩放：在画布按住图片元素，向外或向内拖动。")
+			_set_status("缩放 Ctrl/Cmd+T：选中图片元素，再拖动四角控制点。")
 		Mode.ROTATE:
-			_set_status("旋转：在画布按住图片元素并绕脚底锚点拖动；Shift 吸附 15°。")
+			_set_status("旋转：选中图片元素，再拖动外圈；Shift 吸附 15°。")
 		Mode.PREVIEW:
 			_set_status("预览中：编辑已锁定。Space 播放/暂停。")
 
@@ -2728,7 +2929,7 @@ func _add_water(uv: Rect2, dir: Vector2, id: String) -> void:
 	var flow := DirectorSceneModel.normalize_flow(dir)
 	model.water_regions.append({
 		"id": id,
-		"name": "水域",
+		"name": "矩形水域 %d" % (model.water_regions.size() + 1),
 		"enabled": true,
 		"shape": "rect",
 		"rect_uv": [DirectorSceneModel.snap6(uv.position.x), DirectorSceneModel.snap6(uv.position.y), DirectorSceneModel.snap6(uv.size.x), DirectorSceneModel.snap6(uv.size.y)],
@@ -2904,7 +3105,7 @@ func _drag_move_water(world: Vector2) -> void:
 	if str(region.get("shape", "rect")) == "polygon":
 		var polygon := DirectorSceneModel.points_from_value(region.get("points_uv", []))
 		var bounds := DirectorSceneModel.polygon_bounds(polygon)
-		var desired := _maybe_snap_uv(village.world_to_uv(world))
+		var desired := _maybe_snap_uv(village.world_to_uv(world + _drag_world_offset))
 		var delta := desired - (bounds.position + bounds.size * 0.5)
 		delta.x = clampf(delta.x, -bounds.position.x, 1.0 - bounds.end.x)
 		delta.y = clampf(delta.y, -bounds.position.y, 1.0 - bounds.end.y)
@@ -2914,7 +3115,7 @@ func _drag_move_water(world: Vector2) -> void:
 		region["points_uv"] = moved
 		return
 	var rect := DirectorSceneModel.rect_from_region(region)
-	var uv := _maybe_snap_uv(village.world_to_uv(world))
+	var uv := _maybe_snap_uv(village.world_to_uv(world + _drag_world_offset))
 	rect.position = uv - rect.size * 0.5
 	rect.position.x = clampf(rect.position.x, 0.0, 1.0 - rect.size.x)
 	rect.position.y = clampf(rect.position.y, 0.0, 1.0 - rect.size.y)
@@ -2971,14 +3172,31 @@ func _drag_move_element(world: Vector2) -> void:
 	var element := _element_by_id(selected_element_id)
 	if element.is_empty():
 		return
-	element["position_uv"] = DirectorSceneModel.vec2_to_arr(_maybe_snap_uv(village.world_to_uv(world)))
+	element["position_uv"] = DirectorSceneModel.vec2_to_arr(_maybe_snap_uv(village.world_to_uv(world + _drag_world_offset)))
 	content.rebuild(model)
 
 
 func _begin_element_transform(world: Vector2) -> void:
-	var hit_id := content.hit_element(world)
+	var hit_id := ""
+	if not selected_element_id.is_empty():
+		if mode == Mode.SCALE and _hit_element_scale_handle(selected_element_id, world):
+			hit_id = selected_element_id
+		elif mode == Mode.ROTATE and _hit_element_rotation_ring(selected_element_id, world):
+			hit_id = selected_element_id
 	if hit_id.is_empty():
-		_set_status("请在图片元素上按住并拖动；也可先从元素列表选择。")
+		var clicked_id := content.hit_element(world)
+		if not clicked_id.is_empty():
+			selected_kind = "element"
+			selected_element_id = clicked_id
+			selected_actor_id = ""
+			selected_water_id = ""
+			selected_region_id = ""
+			_select_tab(0)
+			_refresh_hierarchy()
+			_refresh_inspector()
+			_set_status("已选中元素；请拖动四角缩放。" if mode == Mode.SCALE else "已选中元素；请拖动外圈旋转，Shift 吸附 15°。")
+		else:
+			_set_status("请先点选图片元素，再拖动变换控制点。")
 		return
 	selected_kind = "element"
 	selected_element_id = hit_id
@@ -3030,7 +3248,11 @@ func _drag_route_point(world: Vector2) -> void:
 		return
 	var uv := _maybe_snap_uv(village.world_to_uv(world))
 	if selected_point == -1:
+		uv = _maybe_snap_uv(village.world_to_uv(world + _drag_world_offset))
 		actor["start_uv"] = DirectorSceneModel.vec2_to_arr(uv)
+		var player := actors.player_for(str(actor.get("id", "")))
+		if player:
+			player.position = village.uv_to_world(uv)
 	elif selected_point >= 0:
 		var route: Dictionary = actor.get("route", {})
 		var pts: Array = route.get("points_uv", [])
@@ -3038,6 +3260,25 @@ func _drag_route_point(world: Vector2) -> void:
 			pts[selected_point] = DirectorSceneModel.vec2_to_arr(uv)
 			route["points_uv"] = pts
 			actor["route"] = route
+
+
+func _nudge_selected_element(key: Key, amount_px: int) -> void:
+	var element := _element_by_id(selected_element_id)
+	if element.is_empty():
+		return
+	var delta := Vector2.ZERO
+	match key:
+		KEY_LEFT: delta.x = -amount_px
+		KEY_RIGHT: delta.x = amount_px
+		KEY_UP: delta.y = -amount_px
+		KEY_DOWN: delta.y = amount_px
+	var size := village.terrain_size()
+	var uv := DirectorSceneModel._vec2(element.get("position_uv", [0.5, 0.5]), Vector2(0.5, 0.5))
+	uv += Vector2(delta.x / maxf(size.x, 1.0), delta.y / maxf(size.y, 1.0))
+	_begin_cmd()
+	element["position_uv"] = DirectorSceneModel.vec2_to_arr(uv.clamp(Vector2.ZERO, Vector2.ONE))
+	_end_cmd()
+	content.rebuild(model)
 
 
 func _pop_route_point() -> void:
@@ -3077,6 +3318,28 @@ func _hit_corner(rect: Rect2, world: Vector2) -> int:
 		if world.distance_to(pts[i]) <= lim:
 			return i
 	return -1
+
+
+func _hit_element_scale_handle(element_id: String, world: Vector2) -> bool:
+	var zoom := village.camera.zoom.x if village.camera else 1.0
+	var limit := HANDLE * 1.8 / maxf(zoom, 0.2)
+	for corner in content.element_world_corners(element_id):
+		if corner.distance_to(world) <= limit:
+			return true
+	return false
+
+
+func _hit_element_rotation_ring(element_id: String, world: Vector2) -> bool:
+	var marker := content.element_world_position(element_id)
+	var corners := content.element_world_corners(element_id)
+	if corners.size() != 4:
+		return false
+	var zoom := village.camera.zoom.x if village.camera else 1.0
+	var radius := 0.0
+	for corner in corners:
+		radius = maxf(radius, marker.distance_to(corner))
+	radius += HANDLE * 2.0 / maxf(zoom, 0.2)
+	return absf(marker.distance_to(world) - radius) <= HANDLE * 2.0 / maxf(zoom, 0.2)
 
 
 func _hit_water_vertex(region: Dictionary, world: Vector2) -> int:
@@ -3159,6 +3422,10 @@ func _screen_mouse() -> Vector2:
 	return get_viewport().get_mouse_position()
 
 
+func _pointer_over_canvas(screen_position: Vector2) -> bool:
+	return _canvas_catch != null and _canvas_catch.get_global_rect().has_point(screen_position)
+
+
 func _update_catcher() -> void:
 	if _canvas_catch == null:
 		return
@@ -3237,7 +3504,7 @@ func _shortcuts_blocked() -> bool:
 		return true
 	if _new_dialog.visible or _rename_dialog.visible or _delete_dialog.visible or _help.visible or _conflict_dialog.visible \
 			or _new_chapter_dialog.visible or _rename_chapter_dialog.visible or _delete_chapter_dialog.visible \
-			or _replace_background_dialog.visible:
+			or _replace_background_dialog.visible or _rename_item_dialog.visible:
 		return true
 	var focus := get_viewport().gui_get_focus_owner()
 	return focus is LineEdit or focus is TextEdit

@@ -1,14 +1,20 @@
 class_name WeatherController
 extends CanvasLayer
 
-## Screen-space rain. Cost is viewport-sized, not map-sized.
+## Screen-space rain and time-of-day grading. Cost is viewport-sized, not map-sized.
 
-const SHADER_PATH := "res://shaders/rain.gdshader"
+const RAIN_SHADER_PATH := "res://shaders/rain.gdshader"
+const DAY_SHADER_PATH := "res://shaders/day_cycle.gdshader"
 
-var _overlay: ColorRect
-var _material: ShaderMaterial
+var _day_overlay: ColorRect
+var _day_material: ShaderMaterial
+var _rain_overlay: ColorRect
+var _rain_material: ShaderMaterial
 var _enabled := false
 var _intensity := 0.6
+var _time_of_day := "noon"
+var _moonlight_enabled := true
+var _moonlight_intensity := 0.65
 var _paused := false
 var _director_time := -1.0
 
@@ -17,17 +23,16 @@ func setup() -> void:
 	name = "WeatherCanvas"
 	layer = 16
 	follow_viewport_enabled = false
-	_overlay = ColorRect.new()
-	_overlay.name = "RainOverlay"
-	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_overlay.color = Color(1, 1, 1, 1)
-	_material = ShaderMaterial.new()
-	var shader := load(SHADER_PATH) as Shader
-	if shader:
-		_material.shader = shader
-		_overlay.material = _material
-	add_child(_overlay)
+	_day_overlay = _make_overlay("DayCycleOverlay")
+	_day_material = _make_material(DAY_SHADER_PATH)
+	if _day_material.shader:
+		_day_overlay.material = _day_material
+	add_child(_day_overlay)
+	_rain_overlay = _make_overlay("RainOverlay")
+	_rain_material = _make_material(RAIN_SHADER_PATH)
+	if _rain_material.shader:
+		_rain_overlay.material = _rain_material
+	add_child(_rain_overlay)
 	set_process(true)
 	_refresh()
 
@@ -35,10 +40,15 @@ func setup() -> void:
 func apply(model: DirectorSceneModel) -> void:
 	if model == null:
 		_enabled = false
+		_time_of_day = "noon"
+		_moonlight_enabled = false
 		_refresh()
 		return
 	_enabled = bool(model.weather.get("enabled", false)) and str(model.weather.get("type", "rain")) == "rain"
 	_intensity = clampf(float(model.weather.get("intensity", 0.6)), 0.0, 1.0)
+	_time_of_day = str(model.weather.get("time_of_day", "noon"))
+	_moonlight_enabled = bool(model.weather.get("moonlight_enabled", true))
+	_moonlight_intensity = clampf(float(model.weather.get("moonlight_intensity", 0.65)), 0.0, 1.0)
 	_refresh()
 
 
@@ -49,8 +59,8 @@ func set_paused(paused: bool) -> void:
 
 func set_director_time(value: float) -> void:
 	_director_time = value
-	if _uses_shader():
-		_material.set_shader_parameter("director_time", _director_time)
+	if _uses_rain_shader():
+		_rain_material.set_shader_parameter("director_time", _director_time)
 
 
 func is_raining() -> bool:
@@ -58,46 +68,99 @@ func is_raining() -> bool:
 
 
 func has_visible_effect() -> bool:
-	return _enabled and _overlay != null and _overlay.visible and _intensity > 0.0 and (
-		_uses_shader() or _overlay.color.a > 0.0
+	return _enabled and _rain_overlay != null and _rain_overlay.visible and _intensity > 0.0 and (
+		_uses_rain_shader() or _rain_overlay.color.a > 0.0
 	)
 
 
 func applied_intensity() -> float:
-	if _uses_shader():
-		return float(_material.get_shader_parameter("intensity"))
+	if _uses_rain_shader():
+		return float(_rain_material.get_shader_parameter("intensity"))
 	return _intensity if _enabled else 0.0
 
 
+func applied_time_of_day() -> String:
+	return _time_of_day
+
+
+func applied_moonlight() -> float:
+	return _moonlight_intensity if _time_of_day == "night" and _moonlight_enabled else 0.0
+
+
 func _process(_delta: float) -> void:
-	if _enabled:
-		_layout_overlay()
+	_layout_overlays()
 
 
 func _refresh() -> void:
-	if _overlay == null:
+	if _rain_overlay == null or _day_overlay == null:
 		return
 	var show := _enabled
-	_overlay.visible = show
-	_layout_overlay()
-	if _uses_shader():
+	_rain_overlay.visible = show and _intensity > 0.0
+	_day_overlay.visible = _time_of_day != "noon" or (_time_of_day == "night" and _moonlight_enabled)
+	_layout_overlays()
+	_apply_day_grade()
+	if _uses_rain_shader():
 		var clock := _director_time
 		if _paused and clock < 0.0:
 			clock = 0.0
-		_material.set_shader_parameter("intensity", _intensity if show else 0.0)
-		_material.set_shader_parameter("director_time", clock)
-		_overlay.color = Color(1, 1, 1, 1)
+		_rain_material.set_shader_parameter("intensity", _intensity if show else 0.0)
+		_rain_material.set_shader_parameter("director_time", clock)
+		_rain_overlay.color = Color(1, 1, 1, 1)
 	else:
-		_overlay.material = null
-		_overlay.color = Color(0.05, 0.08, 0.14, 0.42 * _intensity if show else 0.0)
+		_rain_overlay.material = null
+		_rain_overlay.color = Color(0.32, 0.42, 0.58, 0.62 * _intensity if show else 0.0)
 
 
-func _layout_overlay() -> void:
+func _layout_overlays() -> void:
 	var vp := get_viewport().get_visible_rect().size if get_viewport() else Vector2(1280, 720)
-	_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	if _uses_shader():
-		_material.set_shader_parameter("viewport_size", vp)
+	# CanvasLayer has no Control parent. Explicit pixel sizing avoids a zero-size
+	# full-rect on Compatibility/Web renderers.
+	for overlay in [_day_overlay, _rain_overlay]:
+		if overlay:
+			overlay.set_anchors_preset(Control.PRESET_TOP_LEFT)
+			overlay.position = Vector2.ZERO
+			overlay.size = vp
+	if _uses_rain_shader():
+		_rain_material.set_shader_parameter("viewport_size", vp)
 
 
-func _uses_shader() -> bool:
-	return _material != null and _material.shader != null
+func _apply_day_grade() -> void:
+	var settings := {
+		"morning": [Color(1.16, 1.02, 0.82), 0.30, 1.04, 1.00],
+		"noon": [Color.WHITE, 0.0, 1.0, 1.0],
+		"evening": [Color(1.20, 0.78, 0.66), 0.48, 0.88, 1.05],
+		"night": [Color(0.48, 0.62, 1.02), 0.64, 0.58, 1.08],
+	}
+	var values: Array = settings.get(_time_of_day, settings["noon"])
+	var grade_color: Color = values[0]
+	var moon := applied_moonlight()
+	if _day_material != null and _day_material.shader != null:
+		_day_material.set_shader_parameter("grade_color", Vector3(grade_color.r, grade_color.g, grade_color.b))
+		_day_material.set_shader_parameter("grade_strength", float(values[1]))
+		_day_material.set_shader_parameter("exposure", float(values[2]))
+		_day_material.set_shader_parameter("contrast", float(values[3]))
+		_day_material.set_shader_parameter("moonlight", moon)
+		_day_overlay.color = Color.WHITE
+	else:
+		_day_overlay.material = null
+		_day_overlay.color = Color(grade_color.r, grade_color.g, grade_color.b, float(values[1]) * 0.45)
+
+
+func _make_overlay(node_name: String) -> ColorRect:
+	var overlay := ColorRect.new()
+	overlay.name = node_name
+	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overlay.color = Color.WHITE
+	return overlay
+
+
+func _make_material(path: String) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	var shader := load(path) as Shader
+	if shader:
+		material.shader = shader
+	return material
+
+
+func _uses_rain_shader() -> bool:
+	return _rain_material != null and _rain_material.shader != null

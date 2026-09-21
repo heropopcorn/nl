@@ -43,17 +43,21 @@ void fragment() {
 	vec2 uv = UV;
 	uv.x *= aspect;
 
-	float far_n = rain_layer(uv, clock, vec2(mix(0.046, 0.024, i), mix(0.22, 0.14, i)), 1.35, mix(0.11, 0.16, i), 4.0);
-	float mid_n = rain_layer(uv, clock, vec2(mix(0.068, 0.034, i), mix(0.28, 0.17, i)), 1.95, mix(0.13, 0.20, i), 18.0);
-	float near_n = rain_layer(uv, clock, vec2(mix(0.110, 0.054, i), mix(0.36, 0.23, i)), 2.55, mix(0.16, 0.24, i), 33.0);
+	float far_n = rain_layer(uv, clock, vec2(mix(0.046, 0.024, i), mix(0.22, 0.14, i)), 1.35, mix(0.026, 0.042, i), 4.0);
+	float mid_n = rain_layer(uv, clock, vec2(mix(0.068, 0.034, i), mix(0.28, 0.17, i)), 1.95, mix(0.030, 0.050, i), 18.0);
+	float near_n = rain_layer(uv, clock, vec2(mix(0.110, 0.054, i), mix(0.36, 0.23, i)), 2.55, mix(0.036, 0.060, i), 33.0);
 
 	float rain = clamp(far_n * 0.42 + mid_n * 0.74 + near_n * 1.08, 0.0, 1.0);
 	rain *= mix(0.62, 1.0, i);
 
 	vec3 dim_col = vec3(0.05, 0.08, 0.14);
 	vec3 drop_col = vec3(0.86, 0.93, 1.0);
-	float dim_a = 0.28 * i;
-	float drop_a = rain * mix(0.42, 0.86, i);
+	float dim_a = 0.14 * i;
+	float drop_a = rain * mix(0.34, 0.72, i);
 	vec3 col = mix(dim_col, drop_col, clamp(rain * 1.25, 0.0, 1.0));
-	COLOR = vec4(col, clamp(dim_a + drop_a, 0.0, 0.92));
+	// Keep a small always-visible drizzle layer so low intensity never becomes
+	// indistinguishable from a dark transparent overlay.
+	float fine_streak = pow(max(0.0, 1.0 - abs(fract((uv.x + clock * 0.42) * 43.0 + uv.y * 7.0) - 0.5) * 18.0), 8.0);
+	drop_a += fine_streak * i * 0.10;
+	COLOR = vec4(col, clamp(dim_a + drop_a, 0.0, 0.94));
 }

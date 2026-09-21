@@ -46,6 +46,14 @@ func _test_layout_v3_assets_and_fields() -> PackedStringArray:
 		errors.append("layout v3 element rotation roundtrip failed")
 	if int(again.water_regions[0].get("layer", -15)) != 7:
 		errors.append("layout v3 water layer roundtrip failed")
+	model.weather["time_of_day"] = "night"
+	model.weather["moonlight_enabled"] = true
+	model.weather["moonlight_intensity"] = 0.72
+	again = DirectorSceneModel.from_json_text(model.to_json_text())
+	if str(again.weather.get("time_of_day", "")) != "night" \
+			or not bool(again.weather.get("moonlight_enabled", false)) \
+			or not is_equal_approx(float(again.weather.get("moonlight_intensity", 0.0)), 0.72):
+		errors.append("time-of-day and moonlight roundtrip failed")
 	for preset_id in [DirectorSceneModel.PRESET_PROTAGONIST_VILLAGE, DirectorSceneModel.PRESET_VILLAGE_SCHOOL]:
 		var preset_model := _valid_stub()
 		preset_model.background = {"source": "preset", "preset_id": preset_id, "file": null, "pixel_size": [1536, 1024]}

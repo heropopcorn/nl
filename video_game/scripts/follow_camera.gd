@@ -16,9 +16,9 @@ func _ready() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_nudge_zoom(zoom_step)
+			zoom_at_screen_position(zoom_step, event.position)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_nudge_zoom(-zoom_step)
+			zoom_at_screen_position(-zoom_step, event.position)
 		elif event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT:
 			_dragging = true
 			get_viewport().set_input_as_handled()
@@ -39,5 +39,16 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _nudge_zoom(amount: float) -> void:
+	zoom_at_screen_position(amount, get_viewport().get_visible_rect().size * 0.5)
+
+
+func zoom_at_screen_position(amount: float, screen_position: Vector2) -> void:
+	var old_zoom := maxf(zoom.x, 0.001)
 	var next := clampf(zoom.x + amount, min_zoom, max_zoom)
+	if is_equal_approx(next, old_zoom):
+		return
+	# Photoshop-style zoom: the pixel under the pointer stays under it.
+	var screen_center := get_viewport().get_visible_rect().size * 0.5
+	var delta_from_center := screen_position - screen_center
+	offset += delta_from_center * (1.0 / old_zoom - 1.0 / next)
 	zoom = Vector2(next, next)
