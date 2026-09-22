@@ -1,8 +1,9 @@
 class_name RainRegionController
 extends Node2D
 
-## Renders rain only inside user-drawn world-space polygons. Each region has
-## an isolated material so splash and layer settings never leak to neighbours.
+## Renders world-space rain contact points and optional splashes inside user-
+## drawn surface polygons. Full-screen falling streaks belong to WeatherController.
+## Each region has an isolated material so splash settings never leak.
 
 const SHADER_PATH := "res://shaders/rain_region.gdshader"
 
@@ -30,7 +31,7 @@ func rebuild(model: DirectorSceneModel) -> void:
 	if intensity <= 0.0:
 		return
 	for region in model.rain_regions:
-		_spawn(region, intensity)
+		_spawn(model, region, intensity)
 
 
 func set_director_time(value: float) -> void:
@@ -73,7 +74,7 @@ func material_intensity(region_id: String) -> float:
 	return float(material.get_shader_parameter("intensity")) if material else 0.0
 
 
-func _spawn(region: Dictionary, intensity: float) -> void:
+func _spawn(model: DirectorSceneModel, region: Dictionary, intensity: float) -> void:
 	if not bool(region.get("enabled", true)):
 		return
 	var polygon := world_polygon_of(region)
@@ -98,6 +99,10 @@ func _spawn(region: Dictionary, intensity: float) -> void:
 	material.set_shader_parameter("director_time", director_time)
 	material.set_shader_parameter("region_size", bounds.size)
 	material.set_shader_parameter("splashes_enabled", bool(region.get("splashes_enabled", true)))
+	var wind_enabled := bool(model.weather.get("wind_enabled", false))
+	var wind_dir := DirectorSceneModel._vec2(model.weather.get("wind_direction", [1, 0]), Vector2.RIGHT)
+	material.set_shader_parameter("wind_direction", wind_dir.normalized() if wind_dir.length_squared() > 0.000001 else Vector2.RIGHT)
+	material.set_shader_parameter("wind_strength", float(model.weather.get("wind_strength", 0.45)) if wind_enabled else 0.0)
 	surface.material = material
 	add_child(surface)
 	_items[str(region.get("id", ""))] = {"surface": surface, "material": material, "region": region}

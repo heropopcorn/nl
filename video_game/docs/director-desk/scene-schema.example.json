@@ -161,6 +161,12 @@
     "intensity": 0.6,
     "time_of_day": "evening",
     "moonlight_enabled": true,
-    "moonlight_intensity": 0.65
+    "moonlight_intensity": 0.65,
+    "lightning_enabled": true,
+    "lightning_intensity": 0.8,
+    "lightning_frequency": 0.4,
+    "wind_enabled": true,
+    "wind_direction": [-1.0, 0.0],
+    "wind_strength": 0.55
   }
 }
