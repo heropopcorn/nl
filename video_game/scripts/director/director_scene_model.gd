@@ -59,6 +59,8 @@ const KNOWN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "layer"]
 const KNOWN_RAIN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "splashes_enabled", "layer"]
 const KNOWN_WEATHER_KEYS := [
 	"enabled", "type", "intensity", "time_of_day", "moonlight_enabled", "moonlight_intensity",
+	"lightning_enabled", "lightning_intensity", "lightning_frequency",
+	"wind_enabled", "wind_direction", "wind_strength",
 ]
 
 static var _scene_id_re: RegEx
@@ -137,6 +139,12 @@ static func default_weather() -> Dictionary:
 		"time_of_day": "noon",
 		"moonlight_enabled": true,
 		"moonlight_intensity": 0.65,
+		"lightning_enabled": false,
+		"lightning_intensity": 0.75,
+		"lightning_frequency": 0.35,
+		"wind_enabled": false,
+		"wind_direction": [1.0, 0.0],
+		"wind_strength": 0.45,
 	}
 
 
@@ -305,6 +313,9 @@ func to_dict() -> Dictionary:
 	for region in rain_regions:
 		rain_region_out.append(_export_rain_region(region))
 	out["rain_regions"] = rain_region_out
+	var wind_dir := _vec2(weather.get("wind_direction", [1, 0]), Vector2.RIGHT)
+	if wind_dir.length_squared() < UV_EPS:
+		wind_dir = Vector2.RIGHT
 	out["weather"] = _export_with_extras(weather, KNOWN_WEATHER_KEYS, {
 		"enabled": bool(weather.get("enabled", false)),
 		"type": str(weather.get("type", "rain")),
@@ -312,6 +323,12 @@ func to_dict() -> Dictionary:
 		"time_of_day": str(weather.get("time_of_day", "noon")),
 		"moonlight_enabled": bool(weather.get("moonlight_enabled", true)),
 		"moonlight_intensity": snap6(float(weather.get("moonlight_intensity", 0.65))),
+		"lightning_enabled": bool(weather.get("lightning_enabled", false)),
+		"lightning_intensity": snap6(float(weather.get("lightning_intensity", 0.75))),
+		"lightning_frequency": snap6(float(weather.get("lightning_frequency", 0.35))),
+		"wind_enabled": bool(weather.get("wind_enabled", false)),
+		"wind_direction": vec2_to_arr(wind_dir.normalized()),
+		"wind_strength": snap6(float(weather.get("wind_strength", 0.45))),
 	})
 	if camera != null:
 		out["camera"] = camera
@@ -621,6 +638,14 @@ func _validate_weather() -> void:
 	var moonlight := float(weather.get("moonlight_intensity", 0.65))
 	if moonlight < 0.0 or moonlight > 1.0:
 		_err("月光强度须在 0 到 1 之间")
+	for field in ["lightning_intensity", "lightning_frequency", "wind_strength"]:
+		var value := float(weather.get(field, 0.0))
+		if value < 0.0 or value > 1.0:
+			_err("雷电与风参数须在 0 到 1 之间")
+			break
+	var wind_dir := _vec2(weather.get("wind_direction", [1, 0]), Vector2.RIGHT)
+	if wind_dir.length_squared() < UV_EPS:
+		_err("风向不能为零向量")
 
 
 func _parse_background(value: Variant) -> Dictionary:
@@ -790,6 +815,15 @@ func _parse_weather(value: Variant) -> Dictionary:
 	out["time_of_day"] = str(data.get("time_of_day", "noon"))
 	out["moonlight_enabled"] = bool(data.get("moonlight_enabled", true))
 	out["moonlight_intensity"] = clampf(float(data.get("moonlight_intensity", 0.65)), 0.0, 1.0)
+	out["lightning_enabled"] = bool(data.get("lightning_enabled", false))
+	out["lightning_intensity"] = clampf(float(data.get("lightning_intensity", 0.75)), 0.0, 1.0)
+	out["lightning_frequency"] = clampf(float(data.get("lightning_frequency", 0.35)), 0.0, 1.0)
+	out["wind_enabled"] = bool(data.get("wind_enabled", false))
+	var wind_dir := _vec2(data.get("wind_direction", [1, 0]), Vector2.RIGHT)
+	if wind_dir.length_squared() < UV_EPS:
+		wind_dir = Vector2.RIGHT
+	out["wind_direction"] = vec2_to_arr(wind_dir.normalized())
+	out["wind_strength"] = clampf(float(data.get("wind_strength", 0.45)), 0.0, 1.0)
 	return out
 
 

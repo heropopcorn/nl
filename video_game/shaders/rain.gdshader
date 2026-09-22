@@ -8,6 +8,8 @@ render_mode blend_mix, unshaded;
 uniform float intensity : hint_range(0.0, 1.0) = 0.6;
 uniform float director_time = -1.0;
 uniform vec2 viewport_size = vec2(1920.0, 1080.0);
+uniform vec2 wind_direction = vec2(1.0, 0.0);
+uniform float wind_strength : hint_range(0.0, 1.0) = 0.0;
 
 float hash11(float value) {
 	return fract(sin(value * 127.1) * 43758.5453123);
@@ -19,8 +21,13 @@ float hash21(vec2 p) {
 
 float rain_layer(vec2 uv, float t, vec2 cell, float speed, float thick, float seed) {
 	vec2 p = uv;
-	p.x += uv.y * 0.12;
-	p.y -= t * speed;
+	vec2 wind = normalize(wind_direction + vec2(0.0001)) * wind_strength;
+	// A constant slight slant keeps still-air rain organic. Horizontal wind
+	// rotates the streaks and carries them across the screen; vertical wind
+	// speeds up or resists their downward fall.
+	p.x += uv.y * (0.08 - wind.x * 0.92);
+	p.x -= t * speed * wind.x * 0.34;
+	p.y -= t * speed * clamp(1.0 + wind.y * 0.28, 0.68, 1.30);
 	vec2 id = floor(p / cell);
 	vec2 f = fract(p / cell);
 	float keep = step(mix(0.42, 0.16, intensity), hash21(id + vec2(seed, 7.3)));
@@ -57,7 +64,8 @@ void fragment() {
 	vec3 col = mix(dim_col, drop_col, clamp(rain * 1.25, 0.0, 1.0));
 	// Keep a small always-visible drizzle layer so low intensity never becomes
 	// indistinguishable from a dark transparent overlay.
-	float fine_streak = pow(max(0.0, 1.0 - abs(fract((uv.x + clock * 0.42) * 43.0 + uv.y * 7.0) - 0.5) * 18.0), 8.0);
+	vec2 wind = normalize(wind_direction + vec2(0.0001)) * wind_strength;
+	float fine_streak = pow(max(0.0, 1.0 - abs(fract((uv.x - uv.y * wind.x * 0.72 + clock * (0.42 + wind.x * 0.26)) * 43.0 + uv.y * 7.0) - 0.5) * 18.0), 8.0);
 	drop_a += fine_streak * i * 0.10;
 	COLOR = vec4(col, clamp(dim_a + drop_a, 0.0, 0.94));
 }
