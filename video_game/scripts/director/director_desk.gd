@@ -3,8 +3,8 @@ extends Control
 
 ## Director Desk Layout V3: hierarchy/resources, inspector, project browser and canvas tools.
 
-enum Mode { SELECT, BOX_WATER, LASSO_WATER, LASSO_REGION, EDIT_ROUTE, SCALE, ROTATE, PREVIEW }
-enum DragKind { NONE, WATER_MOVE, WATER_RESIZE, WATER_DIR, WATER_POINT, ROUTE_POINT, ELEMENT_MOVE, ELEMENT_SCALE, ELEMENT_ROTATE, BOX }
+enum Mode { SELECT, BOX_WATER, LASSO_WATER, LASSO_REGION, LASSO_RAIN, EDIT_ROUTE, SCALE, ROTATE, PREVIEW }
+enum DragKind { NONE, WATER_MOVE, WATER_RESIZE, WATER_DIR, WATER_POINT, RAIN_POINT, ROUTE_POINT, ELEMENT_MOVE, ELEMENT_SCALE, ELEMENT_ROTATE, BOX }
 
 const HANDLE := 8.0
 const TOP_H := 44.0
@@ -41,7 +41,7 @@ const HELP_TEXT := """导演台 Layout V3
 
 角色：可添加多人；必须先点选角色，才显示和编辑其路线。每人可独立设置层级、速度、路线显隐与循环，播放时同时行走。
 
-环境：可设置早晨、中午、傍晚、夜晚和夜间月光；下雨强度只影响画面。
+环境：可设置早晨、中午、傍晚、夜晚和夜间月光。下雨需要先圈出降雨区域；每块区域可独立决定是否显示落点水花。
 
 顶栏文件/编辑菜单用于创建和维护内容；播放/停止控制当前场景，播放时编辑锁定。
 
@@ -58,6 +58,7 @@ var actors := ActorController.new()
 var content: SceneContentController
 var asset_library := DirectorAssetLibrary.new()
 var weather: WeatherController
+var rain: Node2D
 var gizmos: DirectorGizmos
 var preview := PreviewController.new()
 var undo := DirectorUndoStack.new()
@@ -66,6 +67,7 @@ var selected_water_id := ""
 var selected_actor_id := ""
 var selected_element_id := ""
 var selected_region_id := ""
+var selected_rain_id := ""
 var selected_kind := "background"
 var selected_chapter_id := ""
 var selected_point := -2
@@ -101,6 +103,7 @@ var _transform_start_pointer_angle := 0.0
 var _transform_start_rotation := 0.0
 var _drag_world_offset := Vector2.ZERO
 var _canvas_panning := false
+var _new_rain_splashes := true
 
 var _save_timer: Timer
 var _picker: Node
@@ -277,6 +280,16 @@ func render_gizmos(canvas: Node2D) -> void:
 			var closed := poly.duplicate()
 			closed.append(poly[0])
 			canvas.draw_polyline(closed, Color(0.78, 0.52, 1.0, 0.95 if rid == selected_region_id else 0.48), 3.0 / zoom if rid == selected_region_id else 1.5 / zoom, true)
+	for region in model.rain_regions:
+		var rid := str(region.get("id", ""))
+		var poly: PackedVector2Array = rain.world_polygon_of(region)
+		if poly.size() >= 3:
+			var closed: PackedVector2Array = poly.duplicate()
+			closed.append(poly[0])
+			canvas.draw_polyline(closed, Color(0.42, 0.76, 1.0, 0.98 if rid == selected_rain_id else 0.52), 3.0 / zoom if rid == selected_rain_id else 1.5 / zoom, true)
+			if rid == selected_rain_id:
+				for point in poly:
+					canvas.draw_circle(point, handle * 0.7, Color(0.82, 0.94, 1.0, 1.0))
 	if not selected_element_id.is_empty():
 		var marker := content.element_world_position(selected_element_id)
 		canvas.draw_circle(marker, handle * 1.15, Color(1.0, 0.55, 0.2, 0.9), false, 2.0 / zoom)
@@ -595,32 +608,50 @@ func run_runtime_selftest() -> PackedStringArray:
 	model.weather["time_of_day"] = "night"
 	model.weather["moonlight_enabled"] = true
 	model.weather["moonlight_intensity"] = 0.72
+	model.rain_regions = [
+		{"id": "rain_roof", "name": "屋顶", "enabled": true, "points_uv": [[0.10, 0.10], [0.32, 0.10], [0.30, 0.25], [0.12, 0.25]], "splashes_enabled": true, "layer": 30},
+		{"id": "rain_tree", "name": "树冠", "enabled": true, "points_uv": [[0.55, 0.12], [0.72, 0.15], [0.68, 0.31], [0.52, 0.28]], "splashes_enabled": false, "layer": 31},
+	]
 	_end_cmd()
-	weather.apply(model)
+	var rain_roundtrip := DirectorSceneModel.from_dict(model.to_dict())
+	if rain_roundtrip.rain_regions.size() != 2 \
+			or not bool(rain_roundtrip.rain_regions[0].get("splashes_enabled", false)) \
+			or bool(rain_roundtrip.rain_regions[1].get("splashes_enabled", true)):
+		errors.append("rain regions did not survive scene round-trip")
+	_apply_weather_effects()
 	if not weather.is_raining():
 		errors.append("rain was not enabled")
-	if not weather.has_visible_effect():
-		errors.append("rain overlay was not shown")
+	if weather.has_visible_effect():
+		errors.append("legacy full-screen rain overlay should stay hidden")
 	if absf(weather.applied_intensity() - 0.9) > 0.001:
 		errors.append("rain intensity was not applied")
 	if weather.applied_time_of_day() != "night" or absf(weather.applied_moonlight() - 0.72) > 0.001:
 		errors.append("night moonlight was not applied")
+	if absf(weather.material_moonlight() - 0.72) > 0.001:
+		errors.append("moonlight slider did not reach day-cycle material")
 	var rain_overlay := weather.get_node_or_null("RainOverlay") as ColorRect
-	if rain_overlay == null or rain_overlay.size.x < 100.0 or rain_overlay.size.y < 100.0:
-		errors.append("rain overlay did not cover viewport")
+	if rain_overlay == null or rain_overlay.visible:
+		errors.append("legacy rain overlay should exist only as a hidden compatibility node")
+	if rain.get_child_count() != 2:
+		errors.append("regional rain should create one clipped surface per configured area")
+	if not rain.material_splashes_enabled("rain_roof") or rain.material_splashes_enabled("rain_tree"):
+		errors.append("rain splash setting was not isolated per region")
+	if absf(rain.material_intensity("rain_roof") - 0.9) > 0.001:
+		errors.append("regional rain intensity was not applied")
 	var day_overlay := weather.get_node_or_null("DayCycleOverlay") as ColorRect
 	if day_overlay == null or not day_overlay.visible:
 		errors.append("night colour grade was not visible")
 	model.weather["enabled"] = false
-	weather.apply(model)
-	if weather.is_raining() or weather.has_visible_effect():
-		errors.append("disabling rain should hide overlay")
+	_apply_weather_effects()
+	if weather.is_raining() or rain.get_child_count() != 0:
+		errors.append("disabling rain should remove regional rain")
 	model.weather["enabled"] = true
-	weather.apply(model)
-	if not weather.is_raining() or not weather.has_visible_effect():
-		errors.append("re-enabling rain should show overlay")
+	_apply_weather_effects()
+	if not weather.is_raining() or rain.get_child_count() != 2:
+		errors.append("re-enabling rain should restore regional surfaces")
 	if DisplayServer.get_name() != "headless":
 		weather.set_director_time(1.35)
+		rain.set_director_time(1.35)
 		await village._await_render()
 		village._save_screenshot("director_desk_rain.png")
 	# undo 50
@@ -660,6 +691,10 @@ func _build_world_helpers() -> void:
 	content = SceneContentController.new()
 	village.world.add_child(content)
 	content.setup(village, asset_library)
+	var rain_script := load("res://scripts/director/rain_region_controller.gd") as Script
+	rain = rain_script.new()
+	village.world.add_child(rain)
+	rain.setup(village)
 	weather = WeatherController.new()
 	village.add_child(weather)
 	weather.setup()
@@ -740,9 +775,10 @@ func _fill_top() -> void:
 	file_menu.get_popup().add_item("新建角色", 2)
 	file_menu.get_popup().add_item("新建矩形水域", 3)
 	file_menu.get_popup().add_item("新建底图裁片区域", 4)
-	file_menu.get_popup().add_item("上传自定义资源", 5)
+	file_menu.get_popup().add_item("新建降雨区域", 5)
+	file_menu.get_popup().add_item("上传自定义资源", 6)
 	file_menu.get_popup().add_separator()
-	file_menu.get_popup().add_item("立即保存", 6)
+	file_menu.get_popup().add_item("立即保存", 7)
 	file_menu.get_popup().id_pressed.connect(_on_file_menu)
 	row.add_child(file_menu)
 	var edit_menu := MenuButton.new()
@@ -784,6 +820,7 @@ func _fill_left() -> void:
 	hierarchy_add.get_popup().add_item("矩形水域", 1)
 	hierarchy_add.get_popup().add_item("套索水域", 2)
 	hierarchy_add.get_popup().add_item("底图裁片区域", 3)
+	hierarchy_add.get_popup().add_item("降雨区域", 4)
 	hierarchy_add.get_popup().id_pressed.connect(_on_hierarchy_add)
 	hierarchy_header.add_child(hierarchy_add)
 	_hierarchy_rename_btn = _btn("重命名", _open_selected_item_rename)
@@ -1013,6 +1050,7 @@ func _fill_tools() -> void:
 	_mode_btns[Mode.BOX_WATER] = _btn("矩形水域", func() -> void: _set_mode(Mode.BOX_WATER), 38)
 	_mode_btns[Mode.LASSO_WATER] = _btn("套索水域", func() -> void: _set_mode(Mode.LASSO_WATER), 38)
 	_mode_btns[Mode.LASSO_REGION] = _btn("底图裁片", func() -> void: _set_mode(Mode.LASSO_REGION), 38)
+	_mode_btns[Mode.LASSO_RAIN] = _btn("降雨区域", func() -> void: _start_rain_lasso(true), 38)
 	_mode_btns[Mode.EDIT_ROUTE] = _btn("路线", func() -> void: _set_mode(Mode.EDIT_ROUTE), 38)
 	(_mode_btns[Mode.SELECT] as Button).tooltip_text = "V：点选并拖动；方向键微调，Shift+方向键移动 10 像素"
 	(_mode_btns[Mode.SCALE] as Button).tooltip_text = "Ctrl/Cmd+T：选中图片元素后拖动四角控制点等比缩放"
@@ -1020,6 +1058,7 @@ func _fill_tools() -> void:
 	(_mode_btns[Mode.BOX_WATER] as Button).tooltip_text = "拖出矩形水域"
 	(_mode_btns[Mode.LASSO_WATER] as Button).tooltip_text = "逐点圈出不规则水域"
 	(_mode_btns[Mode.LASSO_REGION] as Button).tooltip_text = "逐点圈出可单独设置层级的背景区域，不会创建水域"
+	(_mode_btns[Mode.LASSO_RAIN] as Button).tooltip_text = "逐点圈出雨真正落下的屋顶、树木或地面；默认带落点水花"
 	for child in _mode_btns.values():
 		col.add_child(child)
 	col.add_child(_btn("镜像", _toggle_selected_flip, 38))
@@ -1134,8 +1173,9 @@ func _on_file_menu(id: int) -> void:
 		2: _add_actor_clicked()
 		3: _set_mode(Mode.BOX_WATER)
 		4: _set_mode(Mode.LASSO_REGION)
-		5: _upload_custom_resource()
-		6: _flush_save()
+		5: _start_rain_lasso(true)
+		6: _upload_custom_resource()
+		7: _flush_save()
 
 
 func _on_edit_menu(id: int) -> void:
@@ -1151,6 +1191,7 @@ func _on_hierarchy_add(id: int) -> void:
 		1: _set_mode(Mode.BOX_WATER)
 		2: _set_mode(Mode.LASSO_WATER)
 		3: _set_mode(Mode.LASSO_REGION)
+		4: _start_rain_lasso(true)
 
 
 func _activate_resource(asset_id: String, category: String, custom: bool) -> void:
@@ -1283,6 +1324,7 @@ func _delete_selected() -> void:
 	match selected_kind:
 		"element": _delete_selected_element()
 		"background_region": _delete_selected_region()
+		"rain": _delete_selected_rain()
 		"water":
 			_begin_cmd(); _remove_water(selected_water_id); _end_cmd(); _select_hierarchy("background", ""); _sync_world()
 		"actor":
@@ -1308,6 +1350,8 @@ func _process(delta: float) -> void:
 	if weather:
 		weather.set_paused(preview.is_paused())
 		weather.set_director_time(preview.director_time)
+	if rain:
+		rain.set_director_time(preview.director_time)
 	if _transport_label:
 		_transport_label.text = preview.status_text()
 	if _play_btn:
@@ -1412,7 +1456,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_pop_route_point()
 			get_viewport().set_input_as_handled()
 			return
-		if key == KEY_ENTER and (mode == Mode.LASSO_WATER or mode == Mode.LASSO_REGION):
+		if key == KEY_ENTER and mode in [Mode.LASSO_WATER, Mode.LASSO_REGION, Mode.LASSO_RAIN]:
 			_finish_lasso()
 			get_viewport().set_input_as_handled()
 			return
@@ -1467,7 +1511,7 @@ func _on_left_mouse(event: InputEventMouseButton) -> void:
 				_set_status("框选水域：拖出矩形，或在对角再点一次结束。")
 			get_viewport().set_input_as_handled()
 			return
-		if mode == Mode.LASSO_WATER or mode == Mode.LASSO_REGION:
+		if mode in [Mode.LASSO_WATER, Mode.LASSO_REGION, Mode.LASSO_RAIN]:
 			_click_lasso(world, event.double_click)
 			get_viewport().set_input_as_handled()
 			return
@@ -1505,6 +1549,8 @@ func _on_mouse_move(_event: InputEventMouseMotion) -> void:
 		_drag_water_dir(world)
 	elif _drag == DragKind.WATER_POINT:
 		_drag_water_point(world)
+	elif _drag == DragKind.RAIN_POINT:
+		_drag_rain_point(world)
 	elif _drag == DragKind.ROUTE_POINT:
 		_drag_route_point(world)
 	elif _drag == DragKind.ELEMENT_MOVE:
@@ -1525,6 +1571,7 @@ func _click_select(world: Vector2) -> void:
 		selected_water_id = ""
 		selected_element_id = ""
 		selected_region_id = ""
+		selected_rain_id = ""
 		_begin_cmd()
 		_drag = DragKind.ROUTE_POINT
 		var hit_player := actors.player_for(hit_actor_id)
@@ -1548,6 +1595,7 @@ func _click_select(world: Vector2) -> void:
 		selected_actor_id = ""
 		selected_water_id = ""
 		selected_region_id = ""
+		selected_rain_id = ""
 		_begin_cmd()
 		_drag = DragKind.ELEMENT_MOVE
 		_drag_world_offset = content.element_world_position(element_id) - world
@@ -1562,6 +1610,7 @@ func _click_select(world: Vector2) -> void:
 		selected_actor_id = ""
 		selected_element_id = ""
 		selected_region_id = ""
+		selected_rain_id = ""
 		selected_point = -2
 		_select_tab(1)
 		var region := _water_by_id(rid)
@@ -1584,6 +1633,23 @@ func _click_select(world: Vector2) -> void:
 		_refresh_inspector()
 		_refresh_hierarchy()
 		return
+	var rain_id: String = rain.hit_region(world, model)
+	if not rain_id.is_empty():
+		selected_kind = "rain"
+		selected_rain_id = rain_id
+		selected_water_id = ""
+		selected_actor_id = ""
+		selected_element_id = ""
+		selected_region_id = ""
+		_select_tab(3)
+		var vertex := _hit_rain_vertex(_rain_by_id(rain_id), world)
+		if vertex >= 0:
+			selected_point = vertex
+			_begin_cmd()
+			_drag = DragKind.RAIN_POINT
+		_refresh_inspector()
+		_refresh_hierarchy()
+		return
 	var region_id := content.hit_background_region(world)
 	if not region_id.is_empty():
 		selected_kind = "background_region"
@@ -1591,6 +1657,7 @@ func _click_select(world: Vector2) -> void:
 		selected_water_id = ""
 		selected_actor_id = ""
 		selected_element_id = ""
+		selected_rain_id = ""
 		_select_tab(0)
 		_refresh_inspector()
 		_refresh_hierarchy()
@@ -1599,6 +1666,7 @@ func _click_select(world: Vector2) -> void:
 	selected_actor_id = ""
 	selected_element_id = ""
 	selected_region_id = ""
+	selected_rain_id = ""
 	selected_point = -2
 	selected_kind = "background"
 	_refresh_inspector()
@@ -1703,8 +1771,9 @@ func _finish_lasso() -> void:
 		selected_water_id = water_id
 		selected_kind = "water"
 		selected_region_id = ""
+		selected_rain_id = ""
 		_select_tab(1)
-	else:
+	elif mode == Mode.LASSO_REGION:
 		var region_id := DirectorSceneModel.new_hex_id("region_", 4)
 		model.background_regions.append({
 			"id": region_id, "name": "底图区域 %d" % (model.background_regions.size() + 1), "enabled": true, "points_uv": points, "layer": 1,
@@ -1712,7 +1781,19 @@ func _finish_lasso() -> void:
 		selected_region_id = region_id
 		selected_kind = "background_region"
 		selected_water_id = ""
+		selected_rain_id = ""
 		_select_tab(0)
+	else:
+		var rain_id := DirectorSceneModel.new_hex_id("rain_", 4)
+		model.rain_regions.append({
+			"id": rain_id, "name": "降雨区域 %d" % (model.rain_regions.size() + 1), "enabled": true,
+			"points_uv": points, "splashes_enabled": _new_rain_splashes, "layer": 30,
+		})
+		selected_rain_id = rain_id
+		selected_kind = "rain"
+		selected_water_id = ""
+		selected_region_id = ""
+		_select_tab(3)
 	_lasso_points = PackedVector2Array()
 	_end_cmd()
 	_sync_world()
@@ -1723,6 +1804,8 @@ func _finish_lasso() -> void:
 		_set_status("水域不能重叠")
 	elif mode == Mode.LASSO_WATER:
 		_set_status("已创建套索水域；工具保持激活，可继续创建，按 Esc 返回移动。")
+	elif mode == Mode.LASSO_RAIN:
+		_set_status("已创建降雨区域（%s水花）；工具保持激活，可继续圈选。" % ("有" if _new_rain_splashes else "无"))
 	else:
 		_set_status("已创建底图裁片；工具保持激活，可继续创建，按 Esc 返回移动。")
 
@@ -1736,6 +1819,7 @@ func _apply_loaded_model(loaded: DirectorSceneModel) -> void:
 	selected_actor_id = ""
 	selected_element_id = ""
 	selected_region_id = ""
+	selected_rain_id = ""
 	selected_kind = "background"
 	_lasso_points = PackedVector2Array()
 	selected_point = -2
@@ -1758,6 +1842,7 @@ func _sync_world(reset_editor_view: bool = false) -> void:
 		village.hide_legacy_water()
 		water.rebuild(null)
 		weather.apply(null)
+		rain.rebuild(null)
 		content.rebuild(null)
 		actors.clear(village)
 		_empty_label.visible = true
@@ -1768,6 +1853,7 @@ func _sync_world(reset_editor_view: bool = false) -> void:
 	_apply_background()
 	content.rebuild(model)
 	water.rebuild(model)
+	rain.rebuild(model)
 	_apply_legacy()
 	actors.rebuild(village, model, reset_editor_view)
 	if village.camera and not reset_editor_view:
@@ -1834,6 +1920,7 @@ func _set_empty_scene() -> void:
 	content.rebuild(null)
 	actors.clear(village)
 	weather.apply(null)
+	rain.rebuild(null)
 	_empty_label.visible = true
 	_scene_name_label.text = "未选择场景"
 	_refresh_all()
@@ -1878,7 +1965,7 @@ func _refresh_hierarchy() -> void:
 	if _hierarchy_box == null:
 		return
 	if _hierarchy_rename_btn:
-		_hierarchy_rename_btn.disabled = model == null or selected_kind not in ["scene", "element", "actor", "water", "background_region"]
+		_hierarchy_rename_btn.disabled = model == null or selected_kind not in ["scene", "element", "actor", "water", "background_region", "rain"]
 	for child in _hierarchy_box.get_children():
 		_hierarchy_box.remove_child(child)
 		child.free()
@@ -1895,6 +1982,8 @@ func _refresh_hierarchy() -> void:
 		_hierarchy_box.add_child(_hierarchy_button("  角色 · " + str(actor.get("display_name", "角色")), "actor", str(actor.get("id", ""))))
 	for region in model.water_regions:
 		_hierarchy_box.add_child(_hierarchy_button("  水流 · " + str(region.get("name", "水域")), "water", str(region.get("id", ""))))
+	for region in model.rain_regions:
+		_hierarchy_box.add_child(_hierarchy_button("  降雨 · " + str(region.get("name", "降雨区域")), "rain", str(region.get("id", ""))))
 	_hierarchy_box.add_child(_hierarchy_button("  特效 · 环境与下雨", "weather", "weather"))
 
 
@@ -1911,6 +2000,7 @@ func _hierarchy_button(label_text: String, kind: String, id: String) -> Button:
 	elif kind == "actor": selected = selected and selected_actor_id == id
 	elif kind == "water": selected = selected and selected_water_id == id
 	elif kind == "background_region": selected = selected and selected_region_id == id
+	elif kind == "rain": selected = selected and selected_rain_id == id
 	button.modulate = Color(1.2, 1.05, 0.68) if selected else Color.WHITE
 	return button
 
@@ -1921,11 +2011,12 @@ func _select_hierarchy(kind: String, id: String) -> void:
 	selected_actor_id = id if kind == "actor" else ""
 	selected_water_id = id if kind == "water" else ""
 	selected_region_id = id if kind == "background_region" else ""
+	selected_rain_id = id if kind == "rain" else ""
 	selected_point = -2
 	match kind:
 		"water": _select_tab(1)
 		"actor": _select_tab(2)
-		"weather": _select_tab(3)
+		"weather", "rain": _select_tab(3)
 		_: _select_tab(0)
 	_refresh_hierarchy()
 	_refresh_inspector()
@@ -1943,9 +2034,10 @@ func _open_selected_item_rename() -> void:
 		"actor": current = str(actors.actor_by_id(model, selected_actor_id).get("display_name", "角色"))
 		"water": current = str(_water_by_id(selected_water_id).get("name", "水域"))
 		"background_region": current = str(_background_region_by_id(selected_region_id).get("name", "底图区域"))
+		"rain": current = str(_rain_by_id(selected_rain_id).get("name", "降雨区域"))
 		_: return
 	_rename_item_kind = selected_kind
-	_rename_item_id = selected_element_id if selected_kind == "element" else selected_actor_id if selected_kind == "actor" else selected_water_id if selected_kind == "water" else selected_region_id
+	_rename_item_id = selected_element_id if selected_kind == "element" else selected_actor_id if selected_kind == "actor" else selected_water_id if selected_kind == "water" else selected_region_id if selected_kind == "background_region" else selected_rain_id
 	_rename_item_edit.text = current
 	_rename_item_dialog.popup_centered()
 	_rename_item_edit.select_all()
@@ -1971,6 +2063,9 @@ func _confirm_item_rename() -> void:
 		"background_region":
 			var bg_region := _background_region_by_id(_rename_item_id)
 			if not bg_region.is_empty(): bg_region["name"] = next_name
+		"rain":
+			var rain_region := _rain_by_id(_rename_item_id)
+			if not rain_region.is_empty(): rain_region["name"] = next_name
 	_end_cmd()
 	_refresh_hierarchy()
 	_refresh_inspector()
@@ -2064,7 +2159,7 @@ func _refresh_inspector() -> void:
 	if _tab_pages.size() < 4:
 		return
 	if _inspector_title:
-		var labels := {"background": "背景属性", "element": "元素属性", "actor": "角色属性", "water": "水流属性", "background_region": "裁片区域属性", "weather": "特效属性", "scene": "场景属性"}
+		var labels := {"background": "背景属性", "element": "元素属性", "actor": "角色属性", "water": "水流属性", "background_region": "裁片区域属性", "rain": "降雨区域属性", "weather": "特效属性", "scene": "场景属性"}
 		_inspector_title.text = "属性 / " + str(labels.get(selected_kind, "Inspector"))
 	_loading = true
 	_fill_scene_tab()
@@ -2409,13 +2504,13 @@ func _fill_weather_tab() -> void:
 		_begin_cmd()
 		model.weather["time_of_day"] = str(time_select.get_item_metadata(index))
 		_end_cmd()
-		weather.apply(model)
+		_apply_weather_effects()
 	)
 	inner.add_child(time_select)
 	inner.add_child(_checkbox("夜晚启用月光", bool(model.weather.get("moonlight_enabled", true)), func(v: bool) -> void:
 		if _loading: return
 		_begin_cmd(); model.weather["moonlight_enabled"] = v; _end_cmd()
-		weather.apply(model)
+		_apply_weather_effects()
 	))
 	inner.add_child(_label("月光强度（仅夜晚生效）", 12, false))
 	var moon := HSlider.new()
@@ -2437,10 +2532,10 @@ func _fill_weather_tab() -> void:
 		_begin_cmd()
 		model.weather["enabled"] = v
 		_end_cmd()
-		weather.apply(model)
+		_apply_weather_effects()
 	))
-	inner.add_child(_label("天气效果：下雨（全屏）", 13, false))
-	inner.add_child(_label("雨线覆盖编辑画面；关闭天气不影响所选时段。", 12, false, true))
+	inner.add_child(_label("天气效果：区域下雨", 13, false))
+	inner.add_child(_label("雨只出现在圈定的屋顶、树冠或地面，不再覆盖整个屏幕。关闭天气不影响所选时段。", 12, false, true))
 	inner.add_child(_label("强度", 13, true))
 	var sl := HSlider.new()
 	sl.min_value = 0
@@ -2451,10 +2546,42 @@ func _fill_weather_tab() -> void:
 	sl.value_changed.connect(func(v: float) -> void:
 		if _loading: return
 		model.weather["intensity"] = v
-		weather.apply(model)
+		_apply_weather_effects()
 	)
 	sl.drag_ended.connect(func(_c: bool) -> void: _end_cmd())
 	inner.add_child(sl)
+	inner.add_child(HSeparator.new())
+	inner.add_child(_label("降雨区域", 13, true))
+	var create_row := HBoxContainer.new()
+	create_row.add_child(_btn("圈选（有水花）", func() -> void: _start_rain_lasso(true)))
+	create_row.add_child(_btn("圈选（无水花）", func() -> void: _start_rain_lasso(false)))
+	inner.add_child(create_row)
+	inner.add_child(_label("例：只沿屋顶轮廓圈选，屋内和屋檐下方就不会出现雨线。树冠可关闭水花，地面可开启。", 12, false, true))
+	var region := _rain_by_id(selected_rain_id)
+	if region.is_empty():
+		inner.add_child(_label("尚未选择降雨区域；可在上方开始圈选，或从 Hierarchy 选择。", 12, false, true))
+		return
+	inner.add_child(_label("当前：" + str(region.get("name", "降雨区域")), 13, true))
+	inner.add_child(_checkbox("启用这个区域", bool(region.get("enabled", true)), func(v: bool) -> void:
+		if _loading: return
+		_begin_cmd(); region["enabled"] = v; _end_cmd(); _apply_weather_effects()
+	))
+	inner.add_child(_checkbox("落点显示水花", bool(region.get("splashes_enabled", true)), func(v: bool) -> void:
+		if _loading: return
+		_begin_cmd(); region["splashes_enabled"] = v; _end_cmd(); _apply_weather_effects()
+	))
+	inner.add_child(_label("显示层级", 12, false))
+	var rain_layer := SpinBox.new()
+	rain_layer.min_value = -100
+	rain_layer.max_value = 100
+	rain_layer.step = 1
+	rain_layer.value = int(region.get("layer", 30))
+	rain_layer.value_changed.connect(func(v: float) -> void:
+		if _loading: return
+		_begin_cmd(); region["layer"] = int(v); _end_cmd(); _apply_weather_effects()
+	)
+	inner.add_child(rain_layer)
+	inner.add_child(_btn("删除降雨区域", _delete_selected_rain))
 
 
 func _add_actor_clicked() -> void:
@@ -2477,12 +2604,35 @@ func _add_actor_clicked() -> void:
 	_set_status("已添加角色。点选角色后编辑它自己的路线。")
 
 
+func _start_rain_lasso(with_splashes: bool) -> void:
+	if model == null:
+		_set_status("请先打开或新建场景。")
+		return
+	_new_rain_splashes = with_splashes
+	if not bool(model.weather.get("enabled", false)) or str(model.weather.get("type", "rain")) != "rain":
+		_begin_cmd()
+		model.weather["enabled"] = true
+		model.weather["type"] = "rain"
+		_end_cmd()
+		_apply_weather_effects()
+	_set_mode(Mode.LASSO_RAIN)
+
+
+func _apply_weather_effects() -> void:
+	if model == null:
+		weather.apply(null)
+		rain.rebuild(null)
+		return
+	weather.apply(model)
+	rain.rebuild(model)
+
+
 func _set_mode(next: Mode) -> void:
 	if next != Mode.PREVIEW and (preview.is_playing() or preview.is_paused()):
 		return
 	if next != Mode.SELECT:
 		_placing_asset = false
-	if next != Mode.LASSO_WATER and next != Mode.LASSO_REGION:
+	if next not in [Mode.LASSO_WATER, Mode.LASSO_REGION, Mode.LASSO_RAIN]:
 		_lasso_points = PackedVector2Array()
 	mode = next
 	_refresh_mode_buttons()
@@ -2498,6 +2648,9 @@ func _set_mode(next: Mode) -> void:
 		Mode.LASSO_REGION:
 			_lasso_points = PackedVector2Array()
 			_set_status("圈底图层：逐点勾画要抬高/压低的底图区域。")
+		Mode.LASSO_RAIN:
+			_lasso_points = PackedVector2Array()
+			_set_status("圈降雨区域：只在框定的屋顶、树木或地面上落雨；当前%s水花。" % ("显示" if _new_rain_splashes else "不显示"))
 		Mode.EDIT_ROUTE:
 			_set_status("编辑路线：左键加点，Backspace 删末点。")
 		Mode.SCALE:
@@ -2619,7 +2772,7 @@ func _on_escape() -> void:
 		_update_catcher()
 		_set_status("已取消框选。")
 		return
-	if mode == Mode.LASSO_WATER or mode == Mode.LASSO_REGION:
+	if mode in [Mode.LASSO_WATER, Mode.LASSO_REGION, Mode.LASSO_RAIN]:
 		_lasso_points = PackedVector2Array()
 		_set_mode(Mode.SELECT)
 		_set_status("已取消套索。")
@@ -3036,6 +3189,7 @@ func _place_asset_at(asset_id: String, uv: Vector2) -> void:
 	selected_actor_id = ""
 	selected_water_id = ""
 	selected_region_id = ""
+	selected_rain_id = ""
 	selected_kind = "element"
 	_placing_asset = false
 	_end_cmd()
@@ -3071,6 +3225,21 @@ func _delete_selected_region() -> void:
 	_refresh_inspector()
 
 
+func _delete_selected_rain() -> void:
+	if model == null or selected_rain_id.is_empty():
+		return
+	_begin_cmd()
+	for i in range(model.rain_regions.size() - 1, -1, -1):
+		if str(model.rain_regions[i].get("id", "")) == selected_rain_id:
+			model.rain_regions.remove_at(i)
+	selected_rain_id = ""
+	selected_kind = "weather"
+	_end_cmd()
+	_apply_weather_effects()
+	_refresh_hierarchy()
+	_refresh_inspector()
+
+
 func _element_by_id(id: String) -> Dictionary:
 	if model == null:
 		return {}
@@ -3093,6 +3262,15 @@ func _water_by_id(id: String) -> Dictionary:
 	if model == null or id.is_empty():
 		return {}
 	for region in model.water_regions:
+		if str(region.get("id", "")) == id:
+			return region
+	return {}
+
+
+func _rain_by_id(id: String) -> Dictionary:
+	if model == null or id.is_empty():
+		return {}
+	for region in model.rain_regions:
 		if str(region.get("id", "")) == id:
 			return region
 	return {}
@@ -3161,6 +3339,16 @@ func _drag_water_dir(world: Vector2) -> void:
 func _drag_water_point(world: Vector2) -> void:
 	var region := _water_by_id(selected_water_id)
 	if region.is_empty() or str(region.get("shape", "rect")) != "polygon":
+		return
+	var points: Array = region.get("points_uv", [])
+	if selected_point >= 0 and selected_point < points.size():
+		points[selected_point] = DirectorSceneModel.vec2_to_arr(_maybe_snap_uv(village.world_to_uv(world)))
+		region["points_uv"] = points
+
+
+func _drag_rain_point(world: Vector2) -> void:
+	var region := _rain_by_id(selected_rain_id)
+	if region.is_empty():
 		return
 	var points: Array = region.get("points_uv", [])
 	if selected_point >= 0 and selected_point < points.size():
@@ -3354,6 +3542,16 @@ func _hit_water_vertex(region: Dictionary, world: Vector2) -> int:
 	return -1
 
 
+func _hit_rain_vertex(region: Dictionary, world: Vector2) -> int:
+	var zoom := village.camera.zoom.x if village.camera else 1.0
+	var limit := HANDLE * 1.6 / zoom
+	var points: Array = region.get("points_uv", [])
+	for i in range(points.size()):
+		if village.uv_to_world(DirectorSceneModel._vec2(points[i], Vector2.ZERO)).distance_to(world) <= limit:
+			return i
+	return -1
+
+
 func _draw_handles(canvas: Node2D, rect: Rect2, handle: float) -> void:
 	var pts := [rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)]
 	for p in pts:
@@ -3429,7 +3627,7 @@ func _pointer_over_canvas(screen_position: Vector2) -> bool:
 func _update_catcher() -> void:
 	if _canvas_catch == null:
 		return
-	var grab := mode == Mode.BOX_WATER or mode == Mode.LASSO_WATER or mode == Mode.LASSO_REGION or mode == Mode.EDIT_ROUTE or mode == Mode.SCALE or mode == Mode.ROTATE or _drag != DragKind.NONE
+	var grab := mode == Mode.BOX_WATER or mode in [Mode.LASSO_WATER, Mode.LASSO_REGION, Mode.LASSO_RAIN] or mode == Mode.EDIT_ROUTE or mode == Mode.SCALE or mode == Mode.ROTATE or _drag != DragKind.NONE
 	_canvas_catch.mouse_filter = Control.MOUSE_FILTER_STOP if grab else Control.MOUSE_FILTER_PASS
 
 

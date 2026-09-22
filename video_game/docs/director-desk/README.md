@@ -13,13 +13,13 @@
 
 - 产品是镜头编排导演台，不是 RPG 或完整关卡编辑器。
 - Layout V3 采用顶部菜单、左侧 Hierarchy/资源库、中间画布/工具、右侧 Inspector、底部 Project 的桌面编辑器布局。
-- “一切皆元素”是统一选择与属性模型；底层继续复用兼容的 `background`、`elements`、`actors`、`water_regions`、`background_regions` 和 `weather` 数据。
+- “一切皆元素”是统一选择与属性模型；底层继续复用兼容的 `background`、`elements`、`actors`、`water_regions`、`background_regions`、`rain_regions` 和 `weather` 数据。
 - Project 中章节 → 场景两级均可维护和排序；播放范围明确为当前场景。
 - 元素、角色与底图裁片使用整数 `layer`，层级越高越靠前，同层使用脚底 Y 排序。
 - 水域可为可缩放矩形或套索多边形，每区有独立流向、速度、材质和碰撞。
 - 普通图片元素支持 PS 式抓取移动、四角缩放和外圈旋转；中键平移不会打断当前操作，变换值可撤销并随场景保存。
 - 场景支持多个角色；只有选中角色显示路线，各路线独立速度并在播放时并行。
-- 环境支持早晨、中午、傍晚、夜晚与夜间月光；天气提供可调强度的全屏下雨效果。
+- 环境支持早晨、中午、傍晚、夜晚与强度变化明确的夜间月光；下雨使用可框定的场景区域，每区可独立决定是否显示落点水花。
 - 用户数据位于 `user://director_desk/`；不覆盖 approved 美术，不做云存档。
 
-场景 `schema_version` 仍为 2，以兼容已有 P0 数据；缺失的 `elements`、`background_regions`、`shape`、`layer`、`rotation_degrees` 和 `route.visible` 均按安全默认值迁移。章节存于 `index.json` schema 2。
+场景 `schema_version` 仍为 2，以兼容已有 P0 数据；缺失的 `elements`、`background_regions`、`rain_regions`、`shape`、`layer`、`rotation_degrees` 和 `route.visible` 均按安全默认值迁移。章节存于 `index.json` schema 2。

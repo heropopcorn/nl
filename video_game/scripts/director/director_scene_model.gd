@@ -12,6 +12,7 @@ const WATER_MAX := 64
 const ACTORS_MAX_PARSE := 32
 const ELEMENTS_MAX := 256
 const REGIONS_MAX := 64
+const RAIN_REGIONS_MAX := 64
 const ROUTE_POINTS_MAX := 256
 const WATER_MIN_PX := 8.0
 const FLOW_SPEED_MAX := 1.5
@@ -36,7 +37,7 @@ const COORD_Y := "down"
 const KNOWN_SCENE_KEYS := [
 	"schema_version", "scene_id", "name", "created_at", "updated_at",
 	"background", "coordinate_space", "editor", "water_regions", "actors",
-	"elements", "background_regions", "weather", "camera", "legacy_water",
+	"elements", "background_regions", "rain_regions", "weather", "camera", "legacy_water",
 ]
 const KNOWN_BG_KEYS := [
 	"source", "preset_id", "file", "original_file_name", "pixel_size",
@@ -55,6 +56,7 @@ const KNOWN_ACTOR_KEYS := [
 const KNOWN_ROUTE_KEYS := ["points_uv", "speed_px_per_sec", "loop", "collision_mode", "visible"]
 const KNOWN_ELEMENT_KEYS := ["id", "asset_id", "display_name", "enabled", "position_uv", "layer", "scale", "rotation_degrees", "flip_h"]
 const KNOWN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "layer"]
+const KNOWN_RAIN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "splashes_enabled", "layer"]
 const KNOWN_WEATHER_KEYS := [
 	"enabled", "type", "intensity", "time_of_day", "moonlight_enabled", "moonlight_intensity",
 ]
@@ -75,6 +77,7 @@ var water_regions: Array[Dictionary] = []
 var actors: Array[Dictionary] = []
 var elements: Array[Dictionary] = []
 var background_regions: Array[Dictionary] = []
+var rain_regions: Array[Dictionary] = []
 var weather: Dictionary = {}
 var camera: Variant = null
 var legacy_water: Variant = null
@@ -233,6 +236,19 @@ func apply_dict(data: Dictionary) -> void:
 				background_regions.append(_parse_background_region(raw_regions[i]))
 	else:
 		_parse_err("background_regions 必须是数组")
+	rain_regions.clear()
+	var raw_rain_regions: Variant = data.get("rain_regions", [])
+	if raw_rain_regions is Array:
+		var rain_list: Array = raw_rain_regions
+		if rain_list.size() > RAIN_REGIONS_MAX:
+			_parse_err("降雨区域数量超过 64")
+		for i in range(mini(rain_list.size(), RAIN_REGIONS_MAX)):
+			if rain_list[i] is Dictionary:
+				rain_regions.append(_parse_rain_region(rain_list[i]))
+			else:
+				_parse_err("降雨区域条目格式无效")
+	else:
+		_parse_err("rain_regions 必须是数组")
 	weather = _parse_weather(data.get("weather", {}))
 	if data.has("camera"):
 		camera = data["camera"]
@@ -285,6 +301,10 @@ func to_dict() -> Dictionary:
 	for region in background_regions:
 		region_out.append(_export_background_region(region))
 	out["background_regions"] = region_out
+	var rain_region_out: Array = []
+	for region in rain_regions:
+		rain_region_out.append(_export_rain_region(region))
+	out["rain_regions"] = rain_region_out
 	out["weather"] = _export_with_extras(weather, KNOWN_WEATHER_KEYS, {
 		"enabled": bool(weather.get("enabled", false)),
 		"type": str(weather.get("type", "rain")),
@@ -438,6 +458,7 @@ func validate() -> void:
 	_validate_actors()
 	_validate_elements()
 	_validate_background_regions()
+	_validate_rain_regions()
 	_validate_weather()
 
 
@@ -565,6 +586,20 @@ func _validate_background_regions() -> void:
 		var points := points_from_value(region.get("points_uv", []))
 		if points.size() < 3 or polygon_area(points) <= UV_EPS:
 			_err("底图区域至少需要 3 个点")
+		for point in points:
+			_validate_uv_point(point)
+
+
+func _validate_rain_regions() -> void:
+	var seen := {}
+	for region in rain_regions:
+		var rid := str(region.get("id", ""))
+		if rid.is_empty() or seen.has(rid):
+			_err("降雨区域 ID 缺失或重复")
+		seen[rid] = true
+		var points := points_from_value(region.get("points_uv", []))
+		if points.size() < 3 or polygon_area(points) <= UV_EPS:
+			_err("降雨区域至少需要 3 个点")
 		for point in points:
 			_validate_uv_point(point)
 
@@ -729,6 +764,20 @@ func _parse_background_region(data: Dictionary) -> Dictionary:
 	return out
 
 
+func _parse_rain_region(data: Dictionary) -> Dictionary:
+	var out := _take_extras(data, KNOWN_RAIN_REGION_KEYS)
+	out["id"] = str(data.get("id", "")).strip_edges()
+	out["name"] = str(data.get("name", "降雨区域"))
+	out["enabled"] = bool(data.get("enabled", true))
+	out["splashes_enabled"] = bool(data.get("splashes_enabled", true))
+	out["layer"] = _as_int(data.get("layer", 30), 30)
+	var points: Array = []
+	for point in points_from_value(data.get("points_uv", [])):
+		points.append(vec2_to_arr(clamp_uv(point)))
+	out["points_uv"] = points
+	return out
+
+
 func _parse_weather(value: Variant) -> Dictionary:
 	if typeof(value) != TYPE_DICTIONARY:
 		_parse_err("weather 必须是对象")
@@ -818,6 +867,15 @@ func _export_background_region(region: Dictionary) -> Dictionary:
 		"id": str(region.get("id", "")), "name": str(region.get("name", "底图区域")),
 		"enabled": bool(region.get("enabled", true)), "points_uv": region.get("points_uv", []),
 		"layer": _as_int(region.get("layer", 0), 0),
+	})
+
+
+func _export_rain_region(region: Dictionary) -> Dictionary:
+	return _export_with_extras(region, KNOWN_RAIN_REGION_KEYS, {
+		"id": str(region.get("id", "")), "name": str(region.get("name", "降雨区域")),
+		"enabled": bool(region.get("enabled", true)), "points_uv": region.get("points_uv", []),
+		"splashes_enabled": bool(region.get("splashes_enabled", true)),
+		"layer": _as_int(region.get("layer", 30), 30),
 	})
 
 
