@@ -16,12 +16,14 @@ void fragment() {
 	graded = (graded - 0.5) * contrast + 0.5;
 
 	vec2 moon_origin = vec2(0.84, 0.10);
-	float moon_glow = exp(-distance(SCREEN_UV, moon_origin) * 3.2);
-	float diagonal = 1.0 - smoothstep(0.0, 0.72, abs((SCREEN_UV.x - moon_origin.x) + (SCREEN_UV.y - moon_origin.y) * 0.48));
-	float moon_wash = moonlight * (moon_glow * 0.24 + diagonal * 0.055);
-	graded += vec3(0.34, 0.48, 0.72) * moon_wash;
-
-	float vignette = smoothstep(0.92, 0.28, length((SCREEN_UV - 0.5) * vec2(0.86, 1.0)));
-	graded *= mix(1.0 - moonlight * 0.12, 1.0, vignette);
+	float moon_glow = exp(-distance(SCREEN_UV, moon_origin) * 2.2);
+	float diagonal = 1.0 - smoothstep(0.04, 0.80, abs((SCREEN_UV.x - moon_origin.x) + (SCREEN_UV.y - moon_origin.y) * 0.48));
+	// A real illumination control: the whole night gains readable cool fill,
+	// while the upper-right moon direction remains visibly brighter. The old
+	// vignette darkening cancelled much of this gain and made the slider appear
+	// ineffective.
+	float fill = moonlight * 0.20;
+	float directional = moonlight * (moon_glow * 0.26 + diagonal * 0.09);
+	graded = graded * (1.0 + fill) + vec3(0.30, 0.43, 0.68) * (fill + directional);
 	COLOR = vec4(clamp(graded, vec3(0.0), vec3(1.0)), 1.0);
 }

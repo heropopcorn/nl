@@ -1,22 +1,19 @@
 class_name WeatherController
 extends CanvasLayer
 
-## Screen-space rain and time-of-day grading. Cost is viewport-sized, not map-sized.
+## Screen-space time-of-day grading. Rain itself is rendered in world-space by
+## RainRegionController so it can land on selected roofs, trees and ground.
 
-const RAIN_SHADER_PATH := "res://shaders/rain.gdshader"
 const DAY_SHADER_PATH := "res://shaders/day_cycle.gdshader"
 
 var _day_overlay: ColorRect
 var _day_material: ShaderMaterial
 var _rain_overlay: ColorRect
-var _rain_material: ShaderMaterial
 var _enabled := false
 var _intensity := 0.6
 var _time_of_day := "noon"
 var _moonlight_enabled := true
 var _moonlight_intensity := 0.65
-var _paused := false
-var _director_time := -1.0
 
 
 func setup() -> void:
@@ -29,9 +26,9 @@ func setup() -> void:
 		_day_overlay.material = _day_material
 	add_child(_day_overlay)
 	_rain_overlay = _make_overlay("RainOverlay")
-	_rain_material = _make_material(RAIN_SHADER_PATH)
-	if _rain_material.shader:
-		_rain_overlay.material = _rain_material
+	# Keep the named node for old scenes/tools, but never draw the former
+	# full-screen rain sheet. RainRegionController owns all visible rain.
+	_rain_overlay.visible = false
 	add_child(_rain_overlay)
 	set_process(true)
 	_refresh()
@@ -52,15 +49,14 @@ func apply(model: DirectorSceneModel) -> void:
 	_refresh()
 
 
-func set_paused(paused: bool) -> void:
-	_paused = paused
-	_refresh()
+func set_paused(_paused_value: bool) -> void:
+	# Kept as part of the director effect-controller API. The day grade is
+	# static; RainRegionController owns animated rain pause/time state.
+	pass
 
 
-func set_director_time(value: float) -> void:
-	_director_time = value
-	if _uses_rain_shader():
-		_rain_material.set_shader_parameter("director_time", _director_time)
+func set_director_time(_value: float) -> void:
+	pass
 
 
 func is_raining() -> bool:
@@ -68,14 +64,10 @@ func is_raining() -> bool:
 
 
 func has_visible_effect() -> bool:
-	return _enabled and _rain_overlay != null and _rain_overlay.visible and _intensity > 0.0 and (
-		_uses_rain_shader() or _rain_overlay.color.a > 0.0
-	)
+	return false
 
 
 func applied_intensity() -> float:
-	if _uses_rain_shader():
-		return float(_rain_material.get_shader_parameter("intensity"))
 	return _intensity if _enabled else 0.0
 
 
@@ -87,6 +79,12 @@ func applied_moonlight() -> float:
 	return _moonlight_intensity if _time_of_day == "night" and _moonlight_enabled else 0.0
 
 
+func material_moonlight() -> float:
+	if _day_material == null or _day_material.shader == null:
+		return 0.0
+	return float(_day_material.get_shader_parameter("moonlight"))
+
+
 func _process(_delta: float) -> void:
 	_layout_overlays()
 
@@ -94,21 +92,12 @@ func _process(_delta: float) -> void:
 func _refresh() -> void:
 	if _rain_overlay == null or _day_overlay == null:
 		return
-	var show := _enabled
-	_rain_overlay.visible = show and _intensity > 0.0
+	_rain_overlay.visible = false
 	_day_overlay.visible = _time_of_day != "noon" or (_time_of_day == "night" and _moonlight_enabled)
 	_layout_overlays()
 	_apply_day_grade()
-	if _uses_rain_shader():
-		var clock := _director_time
-		if _paused and clock < 0.0:
-			clock = 0.0
-		_rain_material.set_shader_parameter("intensity", _intensity if show else 0.0)
-		_rain_material.set_shader_parameter("director_time", clock)
-		_rain_overlay.color = Color(1, 1, 1, 1)
-	else:
-		_rain_overlay.material = null
-		_rain_overlay.color = Color(0.32, 0.42, 0.58, 0.62 * _intensity if show else 0.0)
+	_rain_overlay.material = null
+	_rain_overlay.color = Color.TRANSPARENT
 
 
 func _layout_overlays() -> void:
@@ -120,8 +109,6 @@ func _layout_overlays() -> void:
 			overlay.set_anchors_preset(Control.PRESET_TOP_LEFT)
 			overlay.position = Vector2.ZERO
 			overlay.size = vp
-	if _uses_rain_shader():
-		_rain_material.set_shader_parameter("viewport_size", vp)
 
 
 func _apply_day_grade() -> void:
@@ -160,7 +147,3 @@ func _make_material(path: String) -> ShaderMaterial:
 	if shader:
 		material.shader = shader
 	return material
-
-
-func _uses_rain_shader() -> bool:
-	return _rain_material != null and _rain_material.shader != null

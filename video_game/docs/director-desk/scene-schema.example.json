@@ -137,6 +137,24 @@
       "layer": 1
     }
   ],
+  "rain_regions": [
+    {
+      "id": "rain_roof_01",
+      "name": "校舍屋顶",
+      "enabled": true,
+      "points_uv": [[0.18, 0.16], [0.44, 0.14], [0.47, 0.31], [0.2, 0.33]],
+      "splashes_enabled": true,
+      "layer": 30
+    },
+    {
+      "id": "rain_tree_02",
+      "name": "老槐树树冠",
+      "enabled": true,
+      "points_uv": [[0.62, 0.2], [0.78, 0.22], [0.75, 0.39], [0.59, 0.36]],
+      "splashes_enabled": false,
+      "layer": 31
+    }
+  ],
   "weather": {
     "enabled": true,
     "type": "rain",
