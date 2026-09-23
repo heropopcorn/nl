@@ -2682,7 +2682,7 @@ func _fill_weather_tab() -> void:
 	)
 	wind_strength.drag_ended.connect(func(_c: bool) -> void: _end_cmd())
 	inner.add_child(wind_strength)
-	inner.add_child(_label("风速（控制风丝延伸和消散速度）", 12, false))
+	inner.add_child(_label("风速（1×–20×，控制风丝延伸和消散）", 12, false))
 	var wind_speed := HSlider.new()
 	wind_speed.min_value = 0.0
 	wind_speed.max_value = 1.0

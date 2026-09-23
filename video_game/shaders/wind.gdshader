@@ -25,7 +25,10 @@ vec2 gust_layer(vec2 q, float clock, vec2 cell, float layer_rate, float seed, fl
 	float random_a = hash21(id + vec2(seed, 2.7));
 	float random_b = hash21(id + vec2(5.1, seed));
 	float keep = step(1.0 - density, random_a);
-	float cycle_rate = mix(0.045, 0.22, wind_speed) * mix(0.88, 1.12, layer_rate);
+	// The former maximum (0.22) is now the baseline. An exponential mapping
+	// keeps the lower half controllable while making the top exactly 20x faster.
+	float speed_scale = pow(20.0, clamp(wind_speed, 0.0, 1.0));
+	float cycle_rate = 0.22 * speed_scale * mix(0.88, 1.12, layer_rate);
 	float life_phase = fract(clock * cycle_rate + hash21(id + vec2(seed, 39.1)) * 0.97);
 	float head_progress = clamp(life_phase / 0.58, 0.0, 1.0);
 	float tail_progress = clamp((life_phase - 0.28) / 0.72, 0.0, 1.0);
@@ -46,7 +49,7 @@ vec2 gust_layer(vec2 q, float clock, vec2 cell, float layer_rate, float seed, fl
 	center_y += sin(progress * PI * 2.0 + phase) * 0.042 * s_weight * sin(progress * PI);
 	// Existing ink only breathes slightly after appearing. This avoids the old
 	// effect where the entire snake-like line crawled across the viewport.
-	center_y += sin(clock * mix(0.24, 1.18, wind_speed) + progress * 5.7 + phase) * 0.010 * sin(progress * PI);
+	center_y += sin(clock * 1.18 * speed_scale + progress * 5.7 + phase) * 0.010 * sin(progress * PI);
 
 	// Long thin stroke with soft, tapered tips. A faint parallel scratch gives
 	// the gust the imperfect inked character seen in the reference.
