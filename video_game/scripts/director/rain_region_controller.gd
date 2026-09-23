@@ -86,6 +86,10 @@ func _spawn(model: DirectorSceneModel, region: Dictionary, intensity: float) -> 
 	var surface := Polygon2D.new()
 	surface.name = str(region.get("id", "rain"))
 	surface.polygon = polygon
+	# Contacts are now drawn by the full-screen rain material from the same
+	# endpoint map that clips each streak. Keep this node/material as the region
+	# data carrier and inspection target, but avoid a second unsynchronised splash.
+	surface.visible = false
 	var texture_uv := PackedVector2Array()
 	for point in polygon:
 		texture_uv.append((point - bounds.position) / bounds.size * 64.0)

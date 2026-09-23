@@ -16,14 +16,18 @@ float hash21(vec2 p) {
 // Draw one sparse layer of gusts in wind-local coordinates. Sizes are in
 // viewport-height units, which keeps the lines fine at every aspect ratio.
 vec2 gust_layer(vec2 q, float clock, vec2 cell, float speed, float seed, float density, float width) {
-	vec2 moving = q;
-	moving.x -= clock * speed;
-	moving += vec2(seed * 0.071, seed * 0.043);
-	vec2 id = floor(moving / cell);
-	vec2 f = fract(moving / cell);
+	// Cells stay fixed in space. Time controls how much of a strand has been
+	// written and erased; it never translates the completed curve as a whole.
+	vec2 fixed_pos = q + vec2(seed * 0.071, seed * 0.043);
+	vec2 id = floor(fixed_pos / cell);
+	vec2 f = fract(fixed_pos / cell);
 	float random_a = hash21(id + vec2(seed, 2.7));
 	float random_b = hash21(id + vec2(5.1, seed));
 	float keep = step(1.0 - density, random_a);
+	float cycle_rate = 0.10 + speed * 0.10;
+	float life_phase = fract(clock * cycle_rate + hash21(id + vec2(seed, 39.1)) * 0.97);
+	float head_progress = clamp(life_phase / 0.58, 0.0, 1.0);
+	float tail_progress = clamp((life_phase - 0.28) / 0.72, 0.0, 1.0);
 
 	float start_x = 0.05 + random_b * 0.10;
 	float end_x = 0.72 + hash21(id + vec2(9.3, seed)) * 0.23;
@@ -36,12 +40,18 @@ vec2 gust_layer(vec2 q, float clock, vec2 cell, float speed, float seed, float d
 	float center_y = base_y;
 	center_y += sin(progress * PI) * bow;
 	center_y += sin(progress * PI * 2.0 + phase) * 0.042 * sin(progress * PI);
+	// Existing ink only breathes slightly after appearing. This avoids the old
+	// effect where the entire snake-like line crawled across the viewport.
+	center_y += sin(clock * 0.82 + progress * 5.7 + phase) * 0.010 * sin(progress * PI);
 
 	// Long thin stroke with soft, tapered tips. A faint parallel scratch gives
 	// the gust the imperfect inked character seen in the reference.
 	float distance_to_line = abs((f.y - center_y) * cell.y);
 	float stroke = 1.0 - smoothstep(width, width * 2.25, distance_to_line);
-	float body = smoothstep(start_x, start_x + 0.08, f.x) * (1.0 - smoothstep(end_x - 0.12, end_x, f.x));
+	float spatial_taper = smoothstep(start_x, start_x + 0.08, f.x) * (1.0 - smoothstep(end_x - 0.12, end_x, f.x));
+	float written = 1.0 - smoothstep(head_progress, head_progress + 0.055, progress);
+	float lingering_tail = smoothstep(tail_progress - 0.10, tail_progress + 0.035, progress);
+	float body = spatial_taper * written * lingering_tail;
 	float secondary_offset = width * 3.3;
 	float secondary = 1.0 - smoothstep(width * 0.60, width * 1.65, abs((f.y - center_y) * cell.y - secondary_offset));
 	secondary *= step(0.62, random_b) * body * 0.34;
@@ -49,7 +59,10 @@ vec2 gust_layer(vec2 q, float clock, vec2 cell, float speed, float seed, float d
 
 	// Some strands curl at the trailing end. The spiral is intentionally
 	// incomplete so it reads as a wind hook rather than a circular particle.
-	vec2 curl_center = vec2((start_x + 0.035) * cell.x, base_y * cell.y);
+	float curl_x = mix(start_x, end_x, head_progress);
+	float curl_y = base_y + sin(head_progress * PI) * bow;
+	curl_y += sin(head_progress * PI * 2.0 + phase) * 0.042 * sin(head_progress * PI);
+	vec2 curl_center = vec2(curl_x * cell.x, curl_y * cell.y);
 	vec2 local_pos = f * cell;
 	vec2 curl_vec = local_pos - curl_center;
 	float angle = atan(curl_vec.y, curl_vec.x);
@@ -57,7 +70,8 @@ vec2 gust_layer(vec2 q, float clock, vec2 cell, float speed, float seed, float d
 	float curl_distance = abs(length(curl_vec) - curl_radius);
 	float curl = 1.0 - smoothstep(width * 0.72, width * 1.85, curl_distance);
 	float open_arc = smoothstep(-2.75, -2.20, angle) * (1.0 - smoothstep(1.40, 2.05, angle));
-	curl *= open_arc * keep * step(0.70, hash21(id + vec2(seed, 31.7)));
+	float curl_life = smoothstep(0.08, 0.20, life_phase) * (1.0 - smoothstep(0.78, 0.96, life_phase));
+	curl *= open_arc * keep * step(0.70, hash21(id + vec2(seed, 31.7))) * curl_life;
 
 	return vec2(stroke, curl);
 }

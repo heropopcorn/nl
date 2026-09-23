@@ -644,6 +644,8 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("wind direction effect was not enabled")
 	if absf(weather.applied_wind_strength() - 0.8) > 0.001 or absf(weather.rain_material_wind_strength() - 0.8) > 0.001:
 		errors.append("wind strength did not bend the rain material")
+	if not weather.rain_uses_endpoint_map():
+		errors.append("rain regions did not reach the shared streak/splash endpoint map")
 	if weather.lightning_flash_amount() < 0.75:
 		errors.append("lightning double-flash envelope was not applied")
 	var lightning_overlay := weather.get_node_or_null("LightningOverlay") as ColorRect
@@ -678,6 +680,9 @@ func run_runtime_selftest() -> PackedStringArray:
 		weather.set_director_time(1.35)
 		await village._await_render()
 		village._save_screenshot("director_desk_wind.png")
+		weather.set_director_time(2.35)
+		await village._await_render()
+		village._save_screenshot("director_desk_wind_later.png")
 		model.weather["enabled"] = true
 		model.weather["time_of_day"] = "night"
 		_apply_weather_effects()
@@ -733,7 +738,7 @@ func _build_world_helpers() -> void:
 	rain.setup(village)
 	weather = WeatherController.new()
 	village.add_child(weather)
-	weather.setup()
+	weather.setup(village)
 	gizmos = DirectorGizmos.new()
 	gizmos.desk = self
 	gizmos.name = "DirectorGizmos"
