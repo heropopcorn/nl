@@ -86,11 +86,16 @@ func target_cycle_shift() -> float:
 	return _target_for_cycle(target_data, 1).distance_to(_target_for_cycle(target_data, 2))
 
 
+func fall_tilt_degrees() -> float:
+	var direction := _fall_direction()
+	return rad_to_deg(atan2(absf(direction.x), maxf(direction.y, 0.0001)))
+
+
 func first_splash_preview_time() -> float:
 	if village == null or village.world == null:
 		return 0.0
 	var wind := _wind_direction * _wind_strength
-	var fall_direction := Vector2(0.025 + wind.x * 0.66, 1.0 + wind.y * 0.18).normalized()
+	var fall_direction := _fall_direction()
 	var fall_speed := lerpf(520.0, 1120.0, _intensity) * clampf(1.0 + wind.y * 0.18, 0.78, 1.20)
 	var canvas_transform := village.world.get_global_transform_with_canvas()
 	var viewport_size := get_viewport_rect().size
@@ -159,7 +164,7 @@ func _draw() -> void:
 		return
 	var clock := director_time if director_time >= 0.0 else float(Time.get_ticks_msec()) / 1000.0
 	var wind := _wind_direction * _wind_strength
-	var fall_direction := Vector2(0.025 + wind.x * 0.66, 1.0 + wind.y * 0.18).normalized()
+	var fall_direction := _fall_direction()
 	var fall_speed := lerpf(520.0, 1120.0, _intensity) * clampf(1.0 + wind.y * 0.18, 0.78, 1.20)
 	var canvas_transform := village.world.get_global_transform_with_canvas()
 	for target_data in _targets:
@@ -199,6 +204,16 @@ func _cycle_duration(viewport_size: Vector2, fall_direction: Vector2, fall_speed
 	var longest_distance := (viewport_size.y + 174.0) / maxf(fall_direction.y, 0.18)
 	var longest_travel := longest_distance / maxf(fall_speed, 1.0)
 	return longest_travel + splash_duration + lerpf(REST_TIME_MIN, REST_TIME_MAX, seed)
+
+
+func _fall_direction() -> Vector2:
+	# Wind strength maps linearly to an angle from vertical. Horizontal and
+	# diagonal winds reach 60 degrees at full strength; pure vertical wind keeps
+	# the rain vertical and only changes its fall speed.
+	if not _wind_enabled or _wind_strength <= 0.0001 or absf(_wind_direction.x) <= 0.0001:
+		return Vector2.DOWN
+	var tilt_radians := deg_to_rad(60.0 * _wind_strength)
+	return Vector2(signf(_wind_direction.x) * sin(tilt_radians), cos(tilt_radians)).normalized()
 
 
 func _target_for_cycle(target_data: Dictionary, cycle_index: int) -> Vector2:
