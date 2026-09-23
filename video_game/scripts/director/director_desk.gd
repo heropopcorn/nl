@@ -614,6 +614,7 @@ func run_runtime_selftest() -> PackedStringArray:
 	model.weather["wind_enabled"] = true
 	model.weather["wind_direction"] = [-1.0, 0.0]
 	model.weather["wind_strength"] = 0.8
+	model.weather["wind_speed"] = 0.65
 	model.rain_regions = [
 		{"id": "rain_roof", "name": "屋顶", "enabled": true, "points_uv": [[0.10, 0.10], [0.32, 0.10], [0.30, 0.25], [0.12, 0.25]], "splashes_enabled": true, "layer": 30},
 		{"id": "rain_tree", "name": "树冠", "enabled": true, "points_uv": [[0.55, 0.12], [0.72, 0.15], [0.68, 0.31], [0.52, 0.28]], "splashes_enabled": false, "layer": 31},
@@ -625,8 +626,9 @@ func run_runtime_selftest() -> PackedStringArray:
 			or bool(rain_roundtrip.rain_regions[1].get("splashes_enabled", true)):
 		errors.append("rain regions did not survive scene round-trip")
 	if not bool(rain_roundtrip.weather.get("lightning_enabled", false)) \
-			or not bool(rain_roundtrip.weather.get("wind_enabled", false)) \
-			or DirectorSceneModel._vec2(rain_roundtrip.weather.get("wind_direction", [0, 0]), Vector2.ZERO).dot(Vector2.LEFT) < 0.99:
+		or not bool(rain_roundtrip.weather.get("wind_enabled", false)) \
+		or DirectorSceneModel._vec2(rain_roundtrip.weather.get("wind_direction", [0, 0]), Vector2.ZERO).dot(Vector2.LEFT) < 0.99 \
+		or absf(float(rain_roundtrip.weather.get("wind_speed", 0.0)) - 0.65) > 0.001:
 		errors.append("lightning/wind settings did not survive scene round-trip")
 	_apply_weather_effects()
 	weather.set_director_time(0.0)
@@ -644,8 +646,15 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("wind direction effect was not enabled")
 	if absf(weather.applied_wind_strength() - 0.8) > 0.001 or absf(weather.rain_material_wind_strength() - 0.8) > 0.001:
 		errors.append("wind strength did not bend the rain material")
-	if not weather.rain_uses_endpoint_map():
-		errors.append("rain regions did not reach the shared streak/splash endpoint map")
+	if absf(weather.applied_wind_speed() - 0.65) > 0.001:
+		errors.append("wind speed did not reach the wind material")
+	if not weather.rain_has_paired_impacts():
+		errors.append("rain regions did not create paired target drops")
+	var paired_rain := weather.get_node_or_null("PairedRainDrops") as RainDropOverlay
+	if paired_rain == null or paired_rain.splash_target_count() == 0 or paired_rain.silent_target_count() == 0:
+		errors.append("paired rain did not preserve splash and silent targets")
+	elif paired_rain.target_vertical_span() < 0.05:
+		errors.append("paired rain targets did not cover different travel heights")
 	if weather.lightning_flash_amount() < 0.75:
 		errors.append("lightning double-flash envelope was not applied")
 	var lightning_overlay := weather.get_node_or_null("LightningOverlay") as ColorRect
@@ -655,7 +664,7 @@ func run_runtime_selftest() -> PackedStringArray:
 	if rain_overlay == null or not rain_overlay.visible or rain_overlay.size.x < 100.0 or rain_overlay.size.y < 100.0:
 		errors.append("full-screen rain overlay did not cover viewport")
 	if rain.get_child_count() != 2:
-		errors.append("regional rain should create one clipped surface per configured area")
+		errors.append("regional rain should retain one data carrier per configured area")
 	if not rain.material_splashes_enabled("rain_roof") or rain.material_splashes_enabled("rain_tree"):
 		errors.append("rain splash setting was not isolated per region")
 	if absf(rain.material_intensity("rain_roof") - 0.9) > 0.001:
@@ -690,6 +699,13 @@ func run_runtime_selftest() -> PackedStringArray:
 		rain.set_director_time(1.35)
 		await village._await_render()
 		village._save_screenshot("director_desk_rain.png")
+		var paired_overlay := weather.get_node_or_null("PairedRainDrops") as RainDropOverlay
+		if paired_overlay:
+			var impact_time := paired_overlay.first_splash_preview_time()
+			weather.set_director_time(impact_time)
+			rain.set_director_time(impact_time)
+			await village._await_render()
+			village._save_screenshot("director_desk_rain_impact.png")
 		preview.director_time = 0.0
 		weather.set_director_time(0.0)
 		rain.set_director_time(0.0)
@@ -2666,6 +2682,19 @@ func _fill_weather_tab() -> void:
 	)
 	wind_strength.drag_ended.connect(func(_c: bool) -> void: _end_cmd())
 	inner.add_child(wind_strength)
+	inner.add_child(_label("风速（控制风丝延伸和消散速度）", 12, false))
+	var wind_speed := HSlider.new()
+	wind_speed.min_value = 0.0
+	wind_speed.max_value = 1.0
+	wind_speed.step = 0.01
+	wind_speed.value = float(model.weather.get("wind_speed", 0.5))
+	wind_speed.drag_started.connect(_begin_cmd)
+	wind_speed.value_changed.connect(func(v: float) -> void:
+		if _loading: return
+		model.weather["wind_speed"] = v; weather.apply(model)
+	)
+	wind_speed.drag_ended.connect(func(_c: bool) -> void: _end_cmd())
+	inner.add_child(wind_speed)
 	inner.add_child(HSeparator.new())
 	inner.add_child(_label("降雨区域", 13, true))
 	var create_row := HBoxContainer.new()

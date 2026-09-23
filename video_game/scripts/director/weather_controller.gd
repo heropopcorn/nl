@@ -1,21 +1,20 @@
 class_name WeatherController
 extends CanvasLayer
 
-## Screen-space time-of-day grading and full-screen falling rain. Rain regions
-## are projected into a compact endpoint map so streaks stop at, and splash on,
-## the exact same contact surface.
+## Screen-space time-of-day grading and full-screen falling rain. Each framed
+## rain region also supplies interior impact targets whose drops and optional
+## splashes are animated as one event.
 
 const RAIN_SHADER_PATH := "res://shaders/rain.gdshader"
 const DAY_SHADER_PATH := "res://shaders/day_cycle.gdshader"
 const WIND_SHADER_PATH := "res://shaders/wind.gdshader"
 const LIGHTNING_SHADER_PATH := "res://shaders/lightning.gdshader"
-const ENDPOINT_MAP_WIDTH := 1024
-const ENDPOINT_MAP_HEIGHT := 2
 
 var _day_overlay: ColorRect
 var _day_material: ShaderMaterial
 var _rain_overlay: ColorRect
 var _rain_material: ShaderMaterial
+var _rain_impacts: RainDropOverlay
 var _wind_overlay: ColorRect
 var _wind_material: ShaderMaterial
 var _lightning_overlay: ColorRect
@@ -31,16 +30,11 @@ var _lightning_frequency := 0.35
 var _wind_enabled := false
 var _wind_direction := Vector2.RIGHT
 var _wind_strength := 0.45
+var _wind_speed := 0.5
 var _lightning_flash := 0.0
 var _paused := false
 var _director_time := -1.0
 var _village: VillageSandbox
-var _endpoint_model: DirectorSceneModel
-var _endpoint_texture: ImageTexture
-var _endpoint_canvas_transform := Transform2D()
-var _endpoint_viewport_size := Vector2.ZERO
-var _endpoint_dirty := true
-var _has_rain_endpoints := false
 
 
 func setup(host: VillageSandbox = null) -> void:
@@ -63,6 +57,9 @@ func setup(host: VillageSandbox = null) -> void:
 	if _rain_material.shader:
 		_rain_overlay.material = _rain_material
 	add_child(_rain_overlay)
+	_rain_impacts = RainDropOverlay.new()
+	add_child(_rain_impacts)
+	_rain_impacts.setup(_village)
 	_lightning_overlay = _make_overlay("LightningOverlay")
 	_lightning_material = _make_material(LIGHTNING_SHADER_PATH)
 	if _lightning_material.shader:
@@ -73,8 +70,6 @@ func setup(host: VillageSandbox = null) -> void:
 
 
 func apply(model: DirectorSceneModel) -> void:
-	_endpoint_model = model
-	_endpoint_dirty = true
 	if model == null:
 		_enabled = false
 		_time_of_day = "noon"
@@ -82,7 +77,7 @@ func apply(model: DirectorSceneModel) -> void:
 		_lightning_enabled = false
 		_wind_enabled = false
 		_refresh()
-		_refresh_rain_endpoints(true)
+		_rain_impacts.apply(null)
 		return
 	_enabled = bool(model.weather.get("enabled", false)) and str(model.weather.get("type", "rain")) == "rain"
 	_intensity = clampf(float(model.weather.get("intensity", 0.6)), 0.0, 1.0)
@@ -98,8 +93,9 @@ func apply(model: DirectorSceneModel) -> void:
 		_wind_direction = Vector2.RIGHT
 	_wind_direction = _wind_direction.normalized()
 	_wind_strength = clampf(float(model.weather.get("wind_strength", 0.45)), 0.0, 1.0)
+	_wind_speed = clampf(float(model.weather.get("wind_speed", 0.5)), 0.0, 1.0)
 	_refresh()
-	_refresh_rain_endpoints(true)
+	_rain_impacts.apply(model)
 
 
 func set_paused(paused: bool) -> void:
@@ -113,6 +109,8 @@ func set_director_time(value: float) -> void:
 		_rain_material.set_shader_parameter("director_time", _director_time)
 	if _wind_material and _wind_material.shader:
 		_wind_material.set_shader_parameter("director_time", _director_time)
+	if _rain_impacts:
+		_rain_impacts.set_director_time(_director_time)
 	_apply_dynamic_effects()
 
 
@@ -154,6 +152,10 @@ func applied_wind_strength() -> float:
 	return _wind_strength if _wind_enabled else 0.0
 
 
+func applied_wind_speed() -> float:
+	return _wind_speed if _wind_enabled else 0.0
+
+
 func rain_material_wind_strength() -> float:
 	if not _uses_rain_shader():
 		return 0.0
@@ -168,13 +170,12 @@ func has_wind_effect() -> bool:
 	return _wind_overlay != null and _wind_overlay.visible
 
 
-func rain_uses_endpoint_map() -> bool:
-	return _has_rain_endpoints and _uses_rain_shader()
+func rain_has_paired_impacts() -> bool:
+	return _rain_impacts != null and _rain_impacts.target_count() > 0
 
 
 func _process(_delta: float) -> void:
 	_layout_overlays()
-	_refresh_rain_endpoints()
 	_apply_dynamic_effects()
 
 
@@ -202,6 +203,7 @@ func _refresh() -> void:
 		_rain_overlay.color = Color(0.32, 0.42, 0.58, 0.62 * _intensity if show else 0.0)
 	if _wind_material and _wind_material.shader:
 		_wind_material.set_shader_parameter("strength", _wind_strength if _wind_enabled else 0.0)
+		_wind_material.set_shader_parameter("wind_speed", _wind_speed)
 		_wind_material.set_shader_parameter("wind_direction", _wind_direction)
 		_wind_material.set_shader_parameter("director_time", _director_time)
 		_wind_overlay.color = Color.WHITE
@@ -226,107 +228,6 @@ func _layout_overlays() -> void:
 		_wind_material.set_shader_parameter("viewport_size", vp)
 	if _lightning_material and _lightning_material.shader:
 		_lightning_material.set_shader_parameter("viewport_size", vp)
-
-
-func _refresh_rain_endpoints(force: bool = false) -> void:
-	if not _uses_rain_shader():
-		return
-	if _village == null or _village.world == null or _endpoint_model == null or not _enabled:
-		_clear_rain_endpoints()
-		return
-	var vp := get_viewport().get_visible_rect().size if get_viewport() else Vector2(1280, 720)
-	if vp.x <= 1.0 or vp.y <= 1.0:
-		_clear_rain_endpoints()
-		return
-	var canvas_transform := _village.world.get_global_transform_with_canvas()
-	if not force and not _endpoint_dirty and vp == _endpoint_viewport_size and canvas_transform == _endpoint_canvas_transform:
-		return
-	_endpoint_dirty = false
-	_endpoint_viewport_size = vp
-	_endpoint_canvas_transform = canvas_transform
-
-	var wind := _wind_direction * (_wind_strength if _wind_enabled else 0.0)
-	var fall_direction := Vector2(0.025 + wind.x * 0.66, 1.0 + wind.y * 0.18).normalized()
-	var across_direction := Vector2(fall_direction.y, -fall_direction.x)
-	var aspect := vp.x / vp.y
-	var across_extent := 0.5 * (absf(across_direction.x) * aspect + absf(across_direction.y))
-	var along_extent := 0.5 * (absf(fall_direction.x) * aspect + absf(fall_direction.y))
-	var projected: Array[Dictionary] = []
-	for region in _endpoint_model.rain_regions:
-		if not bool(region.get("enabled", true)):
-			continue
-		var points := DirectorSceneModel.points_from_value(region.get("points_uv", []))
-		if points.size() < 3:
-			continue
-		var polygon := PackedVector2Array()
-		for point in points:
-			var screen_point: Vector2 = canvas_transform * _village.uv_to_world(point)
-			var screen_uv := screen_point / vp
-			var p := (screen_uv - Vector2(0.5, 0.5)) * Vector2(aspect, 1.0)
-			polygon.append(Vector2(p.dot(across_direction), p.dot(fall_direction)))
-		projected.append({
-			"polygon": polygon,
-			"splashes": bool(region.get("splashes_enabled", true)),
-		})
-	if projected.is_empty():
-		_clear_rain_endpoints()
-		return
-
-	var endpoints := PackedFloat32Array()
-	endpoints.resize(ENDPOINT_MAP_WIDTH)
-	endpoints.fill(INF)
-	var splash_flags := PackedByteArray()
-	splash_flags.resize(ENDPOINT_MAP_WIDTH)
-	splash_flags.fill(0)
-	var valid_count := 0
-	for region_data in projected:
-		var polygon: PackedVector2Array = region_data["polygon"]
-		for x in ENDPOINT_MAP_WIDTH:
-			var across := lerpf(-across_extent, across_extent, (float(x) + 0.5) / float(ENDPOINT_MAP_WIDTH))
-			var first_contact := INF
-			for edge in polygon.size():
-				var a := polygon[edge]
-				var b := polygon[(edge + 1) % polygon.size()]
-				var crosses := (a.x <= across and b.x > across) or (b.x <= across and a.x > across)
-				if not crosses:
-					continue
-				var edge_span := b.x - a.x
-				if absf(edge_span) < 0.000001:
-					continue
-				var along := lerpf(a.y, b.y, (across - a.x) / edge_span)
-				first_contact = minf(first_contact, along)
-			if first_contact < endpoints[x]:
-				if is_inf(endpoints[x]):
-					valid_count += 1
-				endpoints[x] = first_contact
-				splash_flags[x] = 255 if bool(region_data["splashes"]) else 0
-	if valid_count == 0:
-		_clear_rain_endpoints()
-		return
-
-	var image := Image.create(ENDPOINT_MAP_WIDTH, ENDPOINT_MAP_HEIGHT, false, Image.FORMAT_RGBA8)
-	for x in ENDPOINT_MAP_WIDTH:
-		var color := Color(0.0, 0.0, 0.0, 1.0)
-		if not is_inf(endpoints[x]):
-			var encoded := clampf(inverse_lerp(-along_extent, along_extent, endpoints[x]), 0.0, 1.0)
-			color = Color(encoded, float(splash_flags[x]) / 255.0, 1.0, 1.0)
-		for y in ENDPOINT_MAP_HEIGHT:
-			image.set_pixel(x, y, color)
-	if _endpoint_texture == null:
-		_endpoint_texture = ImageTexture.create_from_image(image)
-	else:
-		_endpoint_texture.update(image)
-	_has_rain_endpoints = true
-	_rain_material.set_shader_parameter("endpoint_map", _endpoint_texture)
-	_rain_material.set_shader_parameter("has_endpoint_map", true)
-	_rain_material.set_shader_parameter("endpoint_across_extent", across_extent)
-	_rain_material.set_shader_parameter("endpoint_along_extent", along_extent)
-
-
-func _clear_rain_endpoints() -> void:
-	_has_rain_endpoints = false
-	if _uses_rain_shader():
-		_rain_material.set_shader_parameter("has_endpoint_map", false)
 
 
 func _apply_dynamic_effects() -> void:
