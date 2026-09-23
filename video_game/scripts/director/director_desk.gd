@@ -41,7 +41,7 @@ const HELP_TEXT := """导演台 Layout V3
 
 角色：可添加多人；必须先点选角色，才显示和编辑其路线。每人可独立设置层级、速度、路线显隐与循环，播放时同时行走。
 
-环境：可设置昼夜与月光；下雨可启用随机双段闪电。风具有方向和强度，会显示风迹，并让全屏雨线朝风向偏转；框定区域只定义雨滴终点及是否显示落点水花。
+环境：夜晚可独立调整环境亮度与冷色月光；下雨可启用能照亮场景的随机双段闪电。风具有方向和强度，会显示风迹并改变雨滴倾斜；框定区域定义雨滴终点及是否显示落点水花。
 
 顶栏文件/编辑菜单用于创建和维护内容；播放/停止控制当前场景，播放时编辑锁定。
 
@@ -607,6 +607,7 @@ func run_runtime_selftest() -> PackedStringArray:
 	model.weather["intensity"] = 0.9
 	model.weather["rain_density"] = 0.72
 	model.weather["time_of_day"] = "night"
+	model.weather["night_ambient"] = 0.0
 	model.weather["moonlight_enabled"] = true
 	model.weather["moonlight_intensity"] = 0.72
 	model.weather["lightning_enabled"] = true
@@ -630,10 +631,11 @@ func run_runtime_selftest() -> PackedStringArray:
 		or not bool(rain_roundtrip.weather.get("wind_enabled", false)) \
 		or DirectorSceneModel._vec2(rain_roundtrip.weather.get("wind_direction", [0, 0]), Vector2.ZERO).dot(Vector2.LEFT) < 0.99 \
 		or absf(float(rain_roundtrip.weather.get("wind_speed", 0.0)) - 0.65) > 0.001 \
-		or absf(float(rain_roundtrip.weather.get("rain_density", 0.0)) - 0.72) > 0.001:
+		or absf(float(rain_roundtrip.weather.get("rain_density", 0.0)) - 0.72) > 0.001 \
+		or absf(float(rain_roundtrip.weather.get("night_ambient", -1.0))) > 0.001:
 		errors.append("lightning/wind settings did not survive scene round-trip")
 	_apply_weather_effects()
-	weather.set_director_time(0.0)
+	weather.set_director_time(1.35)
 	if not weather.is_raining():
 		errors.append("rain was not enabled")
 	if not weather.has_visible_effect():
@@ -642,6 +644,8 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("rain intensity was not applied")
 	if weather.applied_time_of_day() != "night" or absf(weather.applied_moonlight() - 0.72) > 0.001:
 		errors.append("night moonlight was not applied")
+	if absf(weather.applied_night_ambient()) > 0.001 or absf(weather.material_night_ambient()) > 0.001:
+		errors.append("zero night ambient did not reach day-cycle material")
 	if absf(weather.material_moonlight() - 0.72) > 0.001:
 		errors.append("moonlight slider did not reach day-cycle material")
 	if not weather.has_wind_effect() or weather.applied_wind_direction().dot(Vector2.LEFT) < 0.99:
@@ -659,8 +663,11 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("paired rain targets did not cover different travel heights")
 	elif paired_rain.target_cycle_shift() < 0.005:
 		errors.append("rain targets did not change between cycles")
+	weather.set_director_time(0.0)
 	if weather.lightning_flash_amount() < 0.75:
 		errors.append("lightning double-flash envelope was not applied")
+	if weather.material_lightning() < 0.75:
+		errors.append("lightning did not reach scene relighting material")
 	var lightning_overlay := weather.get_node_or_null("LightningOverlay") as ColorRect
 	if lightning_overlay == null or not lightning_overlay.visible:
 		errors.append("lightning overlay was not visible during flash")
@@ -696,8 +703,22 @@ func run_runtime_selftest() -> PackedStringArray:
 		weather.set_director_time(2.35)
 		await village._await_render()
 		village._save_screenshot("director_desk_wind_later.png")
-		model.weather["enabled"] = true
 		model.weather["time_of_day"] = "night"
+		model.weather["night_ambient"] = 0.0
+		model.weather["moonlight_enabled"] = false
+		model.weather["lightning_enabled"] = false
+		_apply_weather_effects()
+		weather.set_director_time(1.35)
+		await village._await_render()
+		village._save_screenshot("director_desk_night_dark.png")
+		model.weather["moonlight_enabled"] = true
+		model.weather["moonlight_intensity"] = 1.0
+		_apply_weather_effects()
+		await village._await_render()
+		village._save_screenshot("director_desk_night_moonlight.png")
+		model.weather["enabled"] = true
+		model.weather["moonlight_intensity"] = 0.72
+		model.weather["lightning_enabled"] = true
 		_apply_weather_effects()
 		weather.set_director_time(1.35)
 		rain.set_director_time(1.35)
@@ -710,11 +731,17 @@ func run_runtime_selftest() -> PackedStringArray:
 			rain.set_director_time(impact_time)
 			await village._await_render()
 			village._save_screenshot("director_desk_rain_impact.png")
+		preview.state = PreviewController.State.PAUSED
 		preview.director_time = 0.0
+		model.weather["moonlight_enabled"] = false
+		_apply_weather_effects()
 		weather.set_director_time(0.0)
 		rain.set_director_time(0.0)
 		await village._await_render()
 		village._save_screenshot("director_desk_lightning.png")
+		preview.state = PreviewController.State.STOPPED
+		model.weather["moonlight_enabled"] = true
+		_apply_weather_effects()
 	# undo 50
 	var before := model.to_dict()
 	var canonical_before := DirectorSceneModel.from_dict(before).to_dict()
@@ -2568,6 +2595,20 @@ func _fill_weather_tab() -> void:
 		_apply_weather_effects()
 	)
 	inner.add_child(time_select)
+	inner.add_child(_label("夜晚环境亮度（0 为全黑，1 为旧版默认亮度）", 12, false))
+	var night_ambient := HSlider.new()
+	night_ambient.min_value = 0.0
+	night_ambient.max_value = 1.0
+	night_ambient.step = 0.01
+	night_ambient.value = float(model.weather.get("night_ambient", 0.35))
+	night_ambient.drag_started.connect(_begin_cmd)
+	night_ambient.value_changed.connect(func(v: float) -> void:
+		if _loading: return
+		model.weather["night_ambient"] = v
+		weather.apply(model)
+	)
+	night_ambient.drag_ended.connect(func(_changed: bool) -> void: _end_cmd())
+	inner.add_child(night_ambient)
 	inner.add_child(_checkbox("夜晚启用月光", bool(model.weather.get("moonlight_enabled", true)), func(v: bool) -> void:
 		if _loading: return
 		_begin_cmd(); model.weather["moonlight_enabled"] = v; _end_cmd()
