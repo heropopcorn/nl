@@ -38,6 +38,14 @@ var _director_time := -1.0
 var _village: VillageSandbox
 
 
+## Maps the 0–1 wind strength slider to a visual multiplier of the original
+## maximum wind strands: the weakest wind reads at 2/3 of it, the strongest at
+## 3x. Keep in sync with the same mapping in wind.gdshader. Rain tilt uses the
+## raw strength instead (0°–60°, see RainDropOverlay._fall_direction).
+static func wind_visual_scale(strength: float) -> float:
+	return lerpf(2.0 / 3.0, 3.0, clampf(strength, 0.0, 1.0))
+
+
 func setup(host: VillageSandbox = null) -> void:
 	_village = host
 	name = "WeatherCanvas"
@@ -205,7 +213,7 @@ func _refresh() -> void:
 		return
 	var show := _enabled
 	_rain_overlay.visible = show and _intensity > 0.0
-	_wind_overlay.visible = _wind_enabled and _wind_strength > 0.0
+	_wind_overlay.visible = _wind_enabled
 	_lightning_overlay.visible = false
 	_day_overlay.visible = _time_of_day != "noon" or _lightning_flash > 0.003
 	_layout_overlays()

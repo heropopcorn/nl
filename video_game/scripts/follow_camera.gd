@@ -3,6 +3,10 @@ extends Camera2D
 @export var min_zoom := 0.55
 @export var max_zoom := 2.2
 @export var zoom_step := 0.12
+## Hosts that route the wheel themselves (e.g. the director desk, which only
+## zooms when the pointer is over the canvas) turn this off. Otherwise wheel
+## events that a ScrollContainer leaves unconsumed at its ends would zoom here.
+@export var wheel_zoom_enabled := true
 
 var _dragging := false
 
@@ -15,10 +19,9 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			zoom_at_screen_position(zoom_step, event.position)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			zoom_at_screen_position(-zoom_step, event.position)
+		if event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+			if wheel_zoom_enabled:
+				zoom_at_screen_position(zoom_step if event.button_index == MOUSE_BUTTON_WHEEL_UP else -zoom_step, event.position)
 		elif event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT:
 			_dragging = true
 			get_viewport().set_input_as_handled()
