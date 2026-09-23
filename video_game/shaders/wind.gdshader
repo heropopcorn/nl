@@ -1,8 +1,9 @@
 shader_type canvas_item;
 render_mode blend_mix, unshaded;
 
-// Screen-space gust ribbons and small airborne flecks. This stays subtle so
-// wind remains readable without washing out the scene or rain impacts.
+// Long, fine, hand-drawn gusts inspired by illustrated survival games.
+// The strands travel with the selected wind direction, bow gently instead of
+// staying ruler-straight, and occasionally finish in a small curled tail.
 uniform float strength : hint_range(0.0, 1.0) = 0.45;
 uniform vec2 wind_direction = vec2(1.0, 0.0);
 uniform float director_time = -1.0;
@@ -12,6 +13,55 @@ float hash21(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
 }
 
+// Draw one sparse layer of gusts in wind-local coordinates. Sizes are in
+// viewport-height units, which keeps the lines fine at every aspect ratio.
+vec2 gust_layer(vec2 q, float clock, vec2 cell, float speed, float seed, float density, float width) {
+	vec2 moving = q;
+	moving.x -= clock * speed;
+	moving += vec2(seed * 0.071, seed * 0.043);
+	vec2 id = floor(moving / cell);
+	vec2 f = fract(moving / cell);
+	float random_a = hash21(id + vec2(seed, 2.7));
+	float random_b = hash21(id + vec2(5.1, seed));
+	float keep = step(1.0 - density, random_a);
+
+	float start_x = 0.05 + random_b * 0.10;
+	float end_x = 0.72 + hash21(id + vec2(9.3, seed)) * 0.23;
+	float base_y = 0.34 + hash21(id + vec2(seed, 11.9)) * 0.32;
+	float phase = hash21(id + vec2(17.2, seed)) * PI * 2.0;
+	float bow_random = hash21(id + vec2(seed, 21.4));
+	float bow_sign = step(0.5, bow_random) * 2.0 - 1.0;
+	float bow = bow_sign * mix(0.07, 0.17, abs(bow_random - 0.5) * 2.0);
+	float progress = clamp((f.x - start_x) / max(end_x - start_x, 0.01), 0.0, 1.0);
+	float center_y = base_y;
+	center_y += sin(progress * PI) * bow;
+	center_y += sin(progress * PI * 2.0 + phase) * 0.042 * sin(progress * PI);
+
+	// Long thin stroke with soft, tapered tips. A faint parallel scratch gives
+	// the gust the imperfect inked character seen in the reference.
+	float distance_to_line = abs((f.y - center_y) * cell.y);
+	float stroke = 1.0 - smoothstep(width, width * 2.25, distance_to_line);
+	float body = smoothstep(start_x, start_x + 0.08, f.x) * (1.0 - smoothstep(end_x - 0.12, end_x, f.x));
+	float secondary_offset = width * 3.3;
+	float secondary = 1.0 - smoothstep(width * 0.60, width * 1.65, abs((f.y - center_y) * cell.y - secondary_offset));
+	secondary *= step(0.62, random_b) * body * 0.34;
+	stroke = (stroke * body + secondary) * keep;
+
+	// Some strands curl at the trailing end. The spiral is intentionally
+	// incomplete so it reads as a wind hook rather than a circular particle.
+	vec2 curl_center = vec2((start_x + 0.035) * cell.x, base_y * cell.y);
+	vec2 local_pos = f * cell;
+	vec2 curl_vec = local_pos - curl_center;
+	float angle = atan(curl_vec.y, curl_vec.x);
+	float curl_radius = width * 9.0 + (angle + PI) * width * 0.85;
+	float curl_distance = abs(length(curl_vec) - curl_radius);
+	float curl = 1.0 - smoothstep(width * 0.72, width * 1.85, curl_distance);
+	float open_arc = smoothstep(-2.75, -2.20, angle) * (1.0 - smoothstep(1.40, 2.05, angle));
+	curl *= open_arc * keep * step(0.70, hash21(id + vec2(seed, 31.7)));
+
+	return vec2(stroke, curl);
+}
+
 void fragment() {
 	float clock = director_time >= 0.0 ? director_time : TIME;
 	float s = clamp(strength, 0.0, 1.0);
@@ -19,20 +69,19 @@ void fragment() {
 	vec2 side = vec2(-dir.y, dir.x);
 	float aspect = max(viewport_size.x, 1.0) / max(viewport_size.y, 1.0);
 	vec2 p = (UV - 0.5) * vec2(aspect, 1.0);
-	float along = dot(p, dir) - clock * mix(0.20, 0.85, s);
-	float across = dot(p, side);
+	vec2 q = vec2(dot(p, dir), dot(p, side));
 
-	float wave = sin(along * 15.0 + sin(across * 9.0 + clock * 0.8) * 1.4);
-	float ribbon = pow(max(0.0, 1.0 - abs(wave) * 2.8), 5.0);
-	ribbon *= 0.45 + 0.55 * sin(across * 21.0 + clock) * sin(across * 21.0 + clock);
+	float density = mix(0.26, 0.58, s);
+	vec2 far_gust = gust_layer(q, clock, vec2(1.18, 0.31), mix(0.22, 0.55, s), 3.0, density, 0.00072);
+	vec2 mid_gust = gust_layer(q, clock, vec2(0.86, 0.25), mix(0.31, 0.74, s), 13.0, density * 0.92, 0.00092);
+	vec2 near_gust = gust_layer(q, clock, vec2(0.64, 0.20), mix(0.42, 0.96, s), 29.0, density * 0.74, 0.00112);
 
-	vec2 cells = vec2(along * 22.0, across * 18.0);
-	vec2 id = floor(cells);
-	vec2 f = fract(cells) - 0.5;
-	float keep = step(mix(0.94, 0.76, s), hash21(id));
-	float fleck = (1.0 - smoothstep(0.02, 0.08, abs(f.y))) * (1.0 - smoothstep(0.12, 0.42, abs(f.x)));
-	fleck *= keep;
-
-	float alpha = (ribbon * 0.055 + fleck * 0.24) * s;
-	COLOR = vec4(vec3(0.78, 0.88, 0.84), clamp(alpha, 0.0, 0.28));
+	float strands = far_gust.x * 0.56 + mid_gust.x * 0.78 + near_gust.x;
+	float curls = far_gust.y * 0.48 + mid_gust.y * 0.68 + near_gust.y * 0.82;
+	float wind_ink = clamp(strands + curls, 0.0, 1.0);
+	float alpha = clamp(wind_ink * mix(0.34, 0.76, s) * s, 0.0, 0.82);
+	// Darker antialiased edges keep the one-pixel strands legible over bright
+	// grass, while the warm core retains the chalk/ink look of the reference.
+	vec3 ink = mix(vec3(0.34, 0.42, 0.39), vec3(0.96, 0.93, 0.77), smoothstep(0.12, 0.82, wind_ink));
+	COLOR = vec4(ink, alpha);
 }
