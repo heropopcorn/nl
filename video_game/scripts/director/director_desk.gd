@@ -670,6 +670,17 @@ func run_runtime_selftest() -> PackedStringArray:
 	if not weather.is_raining() or not weather.has_visible_effect() or rain.get_child_count() != 2:
 		errors.append("re-enabling rain should restore curtain and impact regions")
 	if DisplayServer.get_name() != "headless":
+		# Capture wind on its own so visual regressions in strand length, width,
+		# curvature, and curled tails are not hidden behind the rain curtain.
+		model.weather["enabled"] = false
+		model.weather["time_of_day"] = "noon"
+		_apply_weather_effects()
+		weather.set_director_time(1.35)
+		await village._await_render()
+		village._save_screenshot("director_desk_wind.png")
+		model.weather["enabled"] = true
+		model.weather["time_of_day"] = "night"
+		_apply_weather_effects()
 		weather.set_director_time(1.35)
 		rain.set_director_time(1.35)
 		await village._await_render()
