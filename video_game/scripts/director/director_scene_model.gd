@@ -60,7 +60,7 @@ const KNOWN_RAIN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "splashes
 const KNOWN_WEATHER_KEYS := [
 	"enabled", "type", "intensity", "time_of_day", "moonlight_enabled", "moonlight_intensity",
 	"lightning_enabled", "lightning_intensity", "lightning_frequency",
-	"wind_enabled", "wind_direction", "wind_strength",
+	"wind_enabled", "wind_direction", "wind_strength", "wind_speed",
 ]
 
 static var _scene_id_re: RegEx
@@ -145,6 +145,7 @@ static func default_weather() -> Dictionary:
 		"wind_enabled": false,
 		"wind_direction": [1.0, 0.0],
 		"wind_strength": 0.45,
+		"wind_speed": 0.5,
 	}
 
 
@@ -329,6 +330,7 @@ func to_dict() -> Dictionary:
 		"wind_enabled": bool(weather.get("wind_enabled", false)),
 		"wind_direction": vec2_to_arr(wind_dir.normalized()),
 		"wind_strength": snap6(float(weather.get("wind_strength", 0.45))),
+		"wind_speed": snap6(float(weather.get("wind_speed", 0.5))),
 	})
 	if camera != null:
 		out["camera"] = camera
@@ -638,7 +640,7 @@ func _validate_weather() -> void:
 	var moonlight := float(weather.get("moonlight_intensity", 0.65))
 	if moonlight < 0.0 or moonlight > 1.0:
 		_err("月光强度须在 0 到 1 之间")
-	for field in ["lightning_intensity", "lightning_frequency", "wind_strength"]:
+	for field in ["lightning_intensity", "lightning_frequency", "wind_strength", "wind_speed"]:
 		var value := float(weather.get(field, 0.0))
 		if value < 0.0 or value > 1.0:
 			_err("雷电与风参数须在 0 到 1 之间")
@@ -824,6 +826,7 @@ func _parse_weather(value: Variant) -> Dictionary:
 		wind_dir = Vector2.RIGHT
 	out["wind_direction"] = vec2_to_arr(wind_dir.normalized())
 	out["wind_strength"] = clampf(float(data.get("wind_strength", 0.45)), 0.0, 1.0)
+	out["wind_speed"] = clampf(float(data.get("wind_speed", 0.5)), 0.0, 1.0)
 	return out
 
 
