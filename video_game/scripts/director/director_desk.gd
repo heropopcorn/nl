@@ -615,7 +615,7 @@ func run_runtime_selftest() -> PackedStringArray:
 	model.weather["lightning_frequency"] = 0.6
 	model.weather["wind_enabled"] = true
 	model.weather["wind_direction"] = [-1.0, 0.0]
-	model.weather["wind_strength"] = 0.8
+	model.weather["wind_strength"] = 1.0
 	model.weather["wind_speed"] = 0.65
 	model.rain_regions = [
 		{"id": "rain_roof", "name": "屋顶", "enabled": true, "points_uv": [[0.10, 0.10], [0.32, 0.10], [0.30, 0.25], [0.12, 0.25]], "splashes_enabled": true, "layer": 30},
@@ -650,7 +650,7 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("moonlight slider did not reach day-cycle material")
 	if not weather.has_wind_effect() or weather.applied_wind_direction().dot(Vector2.LEFT) < 0.99:
 		errors.append("wind direction effect was not enabled")
-	if absf(weather.applied_wind_strength() - 0.8) > 0.001 or absf(weather.rain_material_wind_strength() - 0.8) > 0.001:
+	if absf(weather.applied_wind_strength() - 1.0) > 0.001 or absf(weather.rain_material_wind_strength() - 1.0) > 0.001:
 		errors.append("wind strength did not bend the rain material")
 	if absf(weather.applied_wind_speed() - 0.65) > 0.001:
 		errors.append("wind speed did not reach the wind material")
@@ -663,6 +663,8 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("paired rain targets did not cover different travel heights")
 	elif paired_rain.target_cycle_shift() < 0.005:
 		errors.append("rain targets did not change between cycles")
+	elif absf(paired_rain.fall_tilt_degrees() - 60.0) > 0.1:
+		errors.append("maximum wind did not tilt rain to 60 degrees")
 	weather.set_director_time(0.0)
 	if weather.lightning_flash_amount() < 0.75:
 		errors.append("lightning double-flash envelope was not applied")
@@ -2728,7 +2730,7 @@ func _fill_weather_tab() -> void:
 		_begin_cmd(); model.weather["wind_direction"] = DirectorSceneModel.vec2_to_arr(direction); _end_cmd(); _apply_weather_effects()
 	)
 	inner.add_child(wind_select)
-	inner.add_child(_label("风力（会改变雨线倾斜和移动方向）", 12, false))
+	inner.add_child(_label("风力（雨滴倾角随风力增加，最大 60°）", 12, false))
 	var wind_strength := HSlider.new()
 	wind_strength.min_value = 0.0
 	wind_strength.max_value = 1.0
