@@ -15,6 +15,11 @@ var _wind_direction := Vector2.RIGHT
 var _wind_strength := 0.0
 var _targets: Array[Dictionary] = []
 
+const SPLASH_DURATION := 0.62
+const SILENT_IMPACT_DURATION := 0.08
+const REST_TIME_MIN := 0.08
+const REST_TIME_MAX := 0.24
+
 
 func setup(host: VillageSandbox) -> void:
 	village = host
@@ -87,8 +92,8 @@ func first_splash_preview_time() -> float:
 		var distance_to_top := (target.y + 54.0) / maxf(fall_direction.y, 0.18)
 		var travel_time := maxf(distance_to_top, 1.0) / fall_speed
 		var seed := float(target_data["seed"])
-		var splash_duration := 0.46
-		var cycle_duration := travel_time + splash_duration + lerpf(0.28, 0.92, seed)
+		var splash_duration := SPLASH_DURATION
+		var cycle_duration := travel_time + splash_duration + lerpf(REST_TIME_MIN, REST_TIME_MAX, seed)
 		var desired_local_time := travel_time + splash_duration * 0.34
 		return fposmod(desired_local_time - seed * cycle_duration * 3.7, cycle_duration)
 	return 0.0
@@ -105,7 +110,9 @@ func _build_targets(model: DirectorSceneModel) -> void:
 		if bounds.size.x <= 0.0001 or bounds.size.y <= 0.0001:
 			continue
 		var polygon_area := absf(_signed_area(polygon))
-		var desired := clampi(int(round(polygon_area * lerpf(220.0, 420.0, _intensity))), 4, 28)
+		# Keep impact points dense enough that the rain reads as ground contact,
+		# not as a foreground veil. Every generated point owns exactly one drop.
+		var desired := clampi(int(round(polygon_area * lerpf(800.0, 1500.0, _intensity))), 12, 96)
 		var region_seed := float(abs(str(region.get("id", "rain")).hash()) % 100000) * 0.0137
 		var added := 0
 		for attempt in desired * 24:
@@ -147,18 +154,18 @@ func _draw() -> void:
 		var start := target - fall_direction * distance_to_top
 		var travel_time := distance_to_top / fall_speed
 		var seed := float(target_data["seed"])
-		var splash_duration := 0.46 if bool(target_data["splashes"]) else 0.12
-		var rest_time := lerpf(0.28, 0.92, seed)
+		var splash_duration := SPLASH_DURATION if bool(target_data["splashes"]) else SILENT_IMPACT_DURATION
+		var rest_time := lerpf(REST_TIME_MIN, REST_TIME_MAX, seed)
 		var cycle_duration := travel_time + splash_duration + rest_time
 		var local_time := fposmod(clock + seed * cycle_duration * 3.7, cycle_duration)
 		var scale := float(target_data["scale"])
 		if local_time < travel_time:
 			var travelled := minf(local_time * fall_speed, distance_to_top)
 			var head := start + fall_direction * travelled
-			var tail_length := minf(lerpf(32.0, 82.0, _intensity) * scale, travelled)
+			var tail_length := minf(lerpf(26.0, 62.0, _intensity) * scale, travelled)
 			var tail := head - fall_direction * tail_length
-			var alpha := lerpf(0.48, 0.86, _intensity)
-			draw_line(tail, head, Color(0.86, 0.93, 1.0, alpha), lerpf(0.8, 1.35, scale), true)
+			var alpha := lerpf(0.44, 0.78, _intensity)
+			draw_line(tail, head, Color(0.86, 0.93, 1.0, alpha), lerpf(0.72, 1.10, scale), true)
 		elif bool(target_data["splashes"]) and local_time < travel_time + splash_duration:
 			var age := clampf((local_time - travel_time) / splash_duration, 0.0, 1.0)
 			_draw_splash(target, age, scale)
