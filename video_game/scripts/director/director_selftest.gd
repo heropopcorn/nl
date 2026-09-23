@@ -47,11 +47,13 @@ func _test_layout_v3_assets_and_fields() -> PackedStringArray:
 	if int(again.water_regions[0].get("layer", -15)) != 7:
 		errors.append("layout v3 water layer roundtrip failed")
 	model.weather["time_of_day"] = "night"
+	model.weather["night_ambient"] = 0.18
 	model.weather["moonlight_enabled"] = true
 	model.weather["moonlight_intensity"] = 0.72
 	model.weather["rain_density"] = 0.37
 	again = DirectorSceneModel.from_json_text(model.to_json_text())
 	if str(again.weather.get("time_of_day", "")) != "night" \
+			or not is_equal_approx(float(again.weather.get("night_ambient", -1.0)), 0.18) \
 			or not bool(again.weather.get("moonlight_enabled", false)) \
 			or not is_equal_approx(float(again.weather.get("moonlight_intensity", 0.0)), 0.72) \
 			or not is_equal_approx(float(again.weather.get("rain_density", 0.0)), 0.37):

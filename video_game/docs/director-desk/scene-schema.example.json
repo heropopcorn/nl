@@ -161,6 +161,7 @@
     "intensity": 0.6,
     "rain_density": 0.6,
     "time_of_day": "evening",
+    "night_ambient": 0.35,
     "moonlight_enabled": true,
     "moonlight_intensity": 0.65,
     "lightning_enabled": true,

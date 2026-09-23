@@ -26,7 +26,9 @@ void fragment() {
 	float bolt = bolt_line(UV, bolt_seed, 0.0, 0.006);
 	float branch = bolt_line(vec2(UV.x, UV.y * 1.18 - 0.04), bolt_seed + 3.1, 0.055, 0.0035) * step(0.22, UV.y) * (1.0 - step(0.66, UV.y));
 	float bolt_alpha = max(bolt, branch * 0.72) * smoothstep(0.18, 0.75, f);
-	float ambient = f * 0.30;
+	// Scene relighting is handled by day_cycle.gdshader; this layer supplies
+	// the visible bolt and a restrained atmospheric bloom above it.
+	float ambient = f * 0.16;
 	vec3 color = mix(vec3(0.68, 0.78, 1.0), vec3(0.94, 0.97, 1.0), bolt_alpha);
 	COLOR = vec4(color, clamp(ambient + bolt_alpha * 0.92, 0.0, 0.96));
 }

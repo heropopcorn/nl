@@ -58,7 +58,7 @@ const KNOWN_ELEMENT_KEYS := ["id", "asset_id", "display_name", "enabled", "posit
 const KNOWN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "layer"]
 const KNOWN_RAIN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "splashes_enabled", "layer"]
 const KNOWN_WEATHER_KEYS := [
-	"enabled", "type", "intensity", "rain_density", "time_of_day", "moonlight_enabled", "moonlight_intensity",
+	"enabled", "type", "intensity", "rain_density", "time_of_day", "night_ambient", "moonlight_enabled", "moonlight_intensity",
 	"lightning_enabled", "lightning_intensity", "lightning_frequency",
 	"wind_enabled", "wind_direction", "wind_strength", "wind_speed",
 ]
@@ -138,6 +138,7 @@ static func default_weather() -> Dictionary:
 		"intensity": 0.6,
 		"rain_density": 0.6,
 		"time_of_day": "noon",
+		"night_ambient": 0.35,
 		"moonlight_enabled": true,
 		"moonlight_intensity": 0.65,
 		"lightning_enabled": false,
@@ -324,6 +325,7 @@ func to_dict() -> Dictionary:
 		"intensity": snap6(float(weather.get("intensity", 0.6))),
 		"rain_density": snap6(float(weather.get("rain_density", 0.6))),
 		"time_of_day": str(weather.get("time_of_day", "noon")),
+		"night_ambient": snap6(float(weather.get("night_ambient", 0.35))),
 		"moonlight_enabled": bool(weather.get("moonlight_enabled", true)),
 		"moonlight_intensity": snap6(float(weather.get("moonlight_intensity", 0.65))),
 		"lightning_enabled": bool(weather.get("lightning_enabled", false)),
@@ -642,6 +644,9 @@ func _validate_weather() -> void:
 		_warn("未知天气类型，已忽略执行")
 	if str(weather.get("time_of_day", "noon")) not in ["morning", "noon", "evening", "night"]:
 		_err("时段必须为早晨、中午、傍晚或夜晚")
+	var night_ambient := float(weather.get("night_ambient", 0.35))
+	if night_ambient < 0.0 or night_ambient > 1.0:
+		_err("夜晚环境亮度须在 0 到 1 之间")
 	var moonlight := float(weather.get("moonlight_intensity", 0.65))
 	if moonlight < 0.0 or moonlight > 1.0:
 		_err("月光强度须在 0 到 1 之间")
@@ -821,6 +826,7 @@ func _parse_weather(value: Variant) -> Dictionary:
 	out["intensity"] = clampf(float(data.get("intensity", 0.6)), 0.0, 1.0)
 	out["rain_density"] = clampf(float(data.get("rain_density", 0.6)), 0.0, 1.0)
 	out["time_of_day"] = str(data.get("time_of_day", "noon"))
+	out["night_ambient"] = clampf(float(data.get("night_ambient", 0.35)), 0.0, 1.0)
 	out["moonlight_enabled"] = bool(data.get("moonlight_enabled", true))
 	out["moonlight_intensity"] = clampf(float(data.get("moonlight_intensity", 0.65)), 0.0, 1.0)
 	out["lightning_enabled"] = bool(data.get("lightning_enabled", false))

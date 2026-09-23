@@ -22,6 +22,7 @@ var _lightning_material: ShaderMaterial
 var _enabled := false
 var _intensity := 0.6
 var _time_of_day := "noon"
+var _night_ambient := 0.35
 var _moonlight_enabled := true
 var _moonlight_intensity := 0.65
 var _lightning_enabled := false
@@ -46,7 +47,6 @@ func setup(host: VillageSandbox = null) -> void:
 	_day_material = _make_material(DAY_SHADER_PATH)
 	if _day_material.shader:
 		_day_overlay.material = _day_material
-	add_child(_day_overlay)
 	_wind_overlay = _make_overlay("WindOverlay")
 	_wind_material = _make_material(WIND_SHADER_PATH)
 	if _wind_material.shader:
@@ -60,6 +60,9 @@ func setup(host: VillageSandbox = null) -> void:
 	_rain_impacts = RainDropOverlay.new()
 	add_child(_rain_impacts)
 	_rain_impacts.setup(_village)
+	# Grade the complete scene, including wind and rain. At zero night ambient
+	# those effects disappear too; moonlight and lightning can relight them.
+	add_child(_day_overlay)
 	_lightning_overlay = _make_overlay("LightningOverlay")
 	_lightning_material = _make_material(LIGHTNING_SHADER_PATH)
 	if _lightning_material.shader:
@@ -73,6 +76,7 @@ func apply(model: DirectorSceneModel) -> void:
 	if model == null:
 		_enabled = false
 		_time_of_day = "noon"
+		_night_ambient = 0.35
 		_moonlight_enabled = false
 		_lightning_enabled = false
 		_wind_enabled = false
@@ -82,6 +86,7 @@ func apply(model: DirectorSceneModel) -> void:
 	_enabled = bool(model.weather.get("enabled", false)) and str(model.weather.get("type", "rain")) == "rain"
 	_intensity = clampf(float(model.weather.get("intensity", 0.6)), 0.0, 1.0)
 	_time_of_day = str(model.weather.get("time_of_day", "noon"))
+	_night_ambient = clampf(float(model.weather.get("night_ambient", 0.35)), 0.0, 1.0)
 	_moonlight_enabled = bool(model.weather.get("moonlight_enabled", true))
 	_moonlight_intensity = clampf(float(model.weather.get("moonlight_intensity", 0.65)), 0.0, 1.0)
 	_lightning_enabled = bool(model.weather.get("lightning_enabled", false))
@@ -134,6 +139,10 @@ func applied_time_of_day() -> String:
 	return _time_of_day
 
 
+func applied_night_ambient() -> float:
+	return _night_ambient if _time_of_day == "night" else 1.0
+
+
 func applied_moonlight() -> float:
 	return _moonlight_intensity if _time_of_day == "night" and _moonlight_enabled else 0.0
 
@@ -142,6 +151,18 @@ func material_moonlight() -> float:
 	if _day_material == null or _day_material.shader == null:
 		return 0.0
 	return float(_day_material.get_shader_parameter("moonlight"))
+
+
+func material_night_ambient() -> float:
+	if _day_material == null or _day_material.shader == null:
+		return 1.0
+	return float(_day_material.get_shader_parameter("night_ambient"))
+
+
+func material_lightning() -> float:
+	if _day_material == null or _day_material.shader == null:
+		return 0.0
+	return float(_day_material.get_shader_parameter("lightning_light"))
 
 
 func applied_wind_direction() -> Vector2:
@@ -186,7 +207,7 @@ func _refresh() -> void:
 	_rain_overlay.visible = show and _intensity > 0.0
 	_wind_overlay.visible = _wind_enabled and _wind_strength > 0.0
 	_lightning_overlay.visible = false
-	_day_overlay.visible = _time_of_day != "noon" or (_time_of_day == "night" and _moonlight_enabled)
+	_day_overlay.visible = _time_of_day != "noon" or _lightning_flash > 0.003
 	_layout_overlays()
 	_apply_day_grade()
 	if _uses_rain_shader():
@@ -235,6 +256,17 @@ func _apply_dynamic_effects() -> void:
 		return
 	var active := _enabled and _lightning_enabled and _lightning_intensity > 0.0
 	_lightning_flash = _lightning_envelope(_director_time) * _lightning_intensity if active else 0.0
+	_day_overlay.visible = _time_of_day != "noon" or _lightning_flash > 0.003
+	if _day_material and _day_material.shader:
+		var values := _time_grade_values()
+		var base_grade: Color = values[0]
+		var flash_mix := smoothstep(0.04, 0.78, _lightning_flash)
+		var flash_grade := Color(0.96, 0.99, 1.06)
+		var active_grade := base_grade.lerp(flash_grade, flash_mix)
+		var relight := maxf(applied_moonlight(), clampf(_lightning_flash * 1.35, 0.0, 1.0))
+		_day_material.set_shader_parameter("grade_color", Vector3(active_grade.r, active_grade.g, active_grade.b))
+		_day_material.set_shader_parameter("moonlight", relight)
+		_day_material.set_shader_parameter("lightning_light", _lightning_flash)
 	_lightning_overlay.visible = _lightning_flash > 0.003
 	if _lightning_material and _lightning_material.shader:
 		var interval := lerpf(14.0, 3.0, _lightning_frequency)
@@ -266,13 +298,7 @@ func _hash01(value: float) -> float:
 
 
 func _apply_day_grade() -> void:
-	var settings := {
-		"morning": [Color(1.16, 1.02, 0.82), 0.30, 1.04, 1.00],
-		"noon": [Color.WHITE, 0.0, 1.0, 1.0],
-		"evening": [Color(1.20, 0.78, 0.66), 0.48, 0.88, 1.05],
-		"night": [Color(0.48, 0.62, 1.02), 0.64, 0.58, 1.08],
-	}
-	var values: Array = settings.get(_time_of_day, settings["noon"])
+	var values := _time_grade_values()
 	var grade_color: Color = values[0]
 	var moon := applied_moonlight()
 	if _day_material != null and _day_material.shader != null:
@@ -280,11 +306,24 @@ func _apply_day_grade() -> void:
 		_day_material.set_shader_parameter("grade_strength", float(values[1]))
 		_day_material.set_shader_parameter("exposure", float(values[2]))
 		_day_material.set_shader_parameter("contrast", float(values[3]))
+		_day_material.set_shader_parameter("night_ambient", applied_night_ambient())
 		_day_material.set_shader_parameter("moonlight", moon)
+		_day_material.set_shader_parameter("lightning_light", _lightning_flash)
 		_day_overlay.color = Color.WHITE
 	else:
 		_day_overlay.material = null
-		_day_overlay.color = Color(grade_color.r, grade_color.g, grade_color.b, float(values[1]) * 0.45)
+		var darkness := 1.0 - applied_night_ambient() if _time_of_day == "night" else 0.0
+		_day_overlay.color = Color(0.0, 0.0, 0.0, darkness)
+
+
+func _time_grade_values() -> Array:
+	var settings := {
+		"morning": [Color(1.16, 1.02, 0.82), 0.30, 1.04, 1.00],
+		"noon": [Color.WHITE, 0.0, 1.0, 1.0],
+		"evening": [Color(1.20, 0.78, 0.66), 0.48, 0.88, 1.05],
+		"night": [Color(0.48, 0.62, 1.02), 0.64, 0.58, 1.08],
+	}
+	return settings.get(_time_of_day, settings["noon"])
 
 
 func _make_overlay(node_name: String) -> ColorRect:
