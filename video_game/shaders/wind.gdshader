@@ -102,15 +102,26 @@ void fragment() {
 	vec2 p = (UV - 0.5) * vec2(aspect, 1.0);
 	vec2 q = vec2(dot(p, dir), dot(p, side));
 
-	float density = mix(0.26, 0.58, s);
-	vec2 far_gust = gust_layer(q, clock, vec2(1.18, 0.31), 0.32, 3.0, density, 0.00050);
-	vec2 mid_gust = gust_layer(q, clock, vec2(0.86, 0.25), 0.62, 13.0, density * 0.92, 0.00064);
-	vec2 near_gust = gust_layer(q, clock, vec2(0.64, 0.20), 0.92, 29.0, density * 0.74, 0.00078);
+	// Effect size as a multiple of the original maximum wind: the weakest
+	// setting is 2/3 of it, the strongest 3x (WeatherController.wind_visual_scale).
+	float e = mix(2.0 / 3.0, 3.0, s);
+	float extra = clamp((e - 1.0) / 2.0, 0.0, 1.0);
+	// Coverage and opacity share the scaling so their product tracks e.
+	float coverage = sqrt(min(e, 1.5));
+	float density = 0.58 * coverage;
+	float width_scale = mix(1.0, 1.35, extra);
+	vec2 far_gust = gust_layer(q, clock, vec2(1.18, 0.31), 0.32, 3.0, density, 0.00050 * width_scale);
+	vec2 mid_gust = gust_layer(q, clock, vec2(0.86, 0.25), 0.62, 13.0, density * 0.92, 0.00064 * width_scale);
+	vec2 near_gust = gust_layer(q, clock, vec2(0.64, 0.20), 0.92, 29.0, density * 0.74, 0.00078 * width_scale);
+	// Additional gust layers only fade in above the original maximum.
+	vec2 extra_a = gust_layer(q, clock, vec2(0.74, 0.22), 0.48, 47.0, density * 0.86 * extra, 0.00070 * width_scale);
+	vec2 extra_b = gust_layer(q, clock, vec2(0.96, 0.27), 0.78, 61.0, density * 0.80 * extra, 0.00060 * width_scale);
 
-	float strands = far_gust.x * 0.56 + mid_gust.x * 0.78 + near_gust.x;
-	float hooks = far_gust.y * 0.50 + mid_gust.y * 0.72 + near_gust.y * 0.86;
+	float strands = far_gust.x * 0.56 + mid_gust.x * 0.78 + near_gust.x + extra_a.x * 0.90 + extra_b.x * 0.70;
+	float hooks = far_gust.y * 0.50 + mid_gust.y * 0.72 + near_gust.y * 0.86 + extra_a.y * 0.80 + extra_b.y * 0.64;
 	float wind_ink = clamp(strands + hooks, 0.0, 1.0);
-	float alpha = clamp(wind_ink * mix(0.34, 0.76, s) * s, 0.0, 0.82);
+	float opacity = 0.76 * sqrt(min(e, 1.0)) + 0.16 * extra;
+	float alpha = clamp(wind_ink * opacity, 0.0, 0.92);
 	// Darker antialiased edges keep the one-pixel strands legible over bright
 	// grass, while the warm core retains the chalk/ink look of the reference.
 	vec3 ink = mix(vec3(0.34, 0.42, 0.39), vec3(0.96, 0.93, 0.77), smoothstep(0.12, 0.82, wind_ink));
