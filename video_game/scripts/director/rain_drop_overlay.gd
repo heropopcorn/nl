@@ -121,6 +121,11 @@ func drops_in_flight_per_stream() -> float:
 	return lerpf(OVERLAP_MIN, OVERLAP_MAX, _intensity)
 
 
+func fall_tilt_degrees() -> float:
+	var direction := _fall_direction()
+	return rad_to_deg(atan2(absf(direction.x), maxf(direction.y, 0.0001)))
+
+
 func first_splash_preview_time() -> float:
 	if village == null or village.world == null:
 		return 0.0
@@ -327,14 +332,8 @@ func _append_splash(center: Vector2, age: float, scale: float, splash_alpha: flo
 	_splash_colors.append(color)
 
 
-func _fall_direction() -> Vector2:
-	var wind := _wind_direction * (WeatherController.wind_visual_scale(_wind_strength) if _wind_enabled else 0.0)
-	return Vector2(0.025 + wind.x * 0.66, 1.0 + wind.y * 0.18).normalized()
-
-
 func _base_fall_speed() -> float:
-	var wind_y := _wind_direction.y * (WeatherController.wind_visual_scale(_wind_strength) if _wind_enabled else 0.0)
-	return lerpf(520.0, 1120.0, _intensity) * clampf(1.0 + wind_y * 0.18, 0.78, 1.20)
+	return lerpf(520.0, 1120.0, _intensity) * clampf(1.0 + _wind_direction.y * _wind_strength * 0.18, 0.78, 1.20)
 
 
 func _longest_travel(viewport_size: Vector2, dir_y: float, base_speed: float) -> float:
@@ -363,6 +362,16 @@ func _drop_speed(base_speed: float, seed: float, k: int) -> float:
 func _pool_index(target_data: Dictionary, cycle_index: int, pool_size: int) -> int:
 	var event_seed := float(target_data["region_seed"]) + float(target_data["slot"]) * 47.11 + float(cycle_index) * 101.73
 	return mini(int(_hash01(event_seed) * float(pool_size)), pool_size - 1)
+
+
+func _fall_direction() -> Vector2:
+	# Wind strength maps linearly to an angle from vertical. Horizontal and
+	# diagonal winds reach 60 degrees at full strength; pure vertical wind keeps
+	# the rain vertical and only changes its fall speed.
+	if not _wind_enabled or _wind_strength <= 0.0001 or absf(_wind_direction.x) <= 0.0001:
+		return Vector2.DOWN
+	var tilt_radians := deg_to_rad(60.0 * _wind_strength)
+	return Vector2(signf(_wind_direction.x) * sin(tilt_radians), cos(tilt_radians)).normalized()
 
 
 func _target_for_cycle(target_data: Dictionary, cycle_index: int) -> Vector2:

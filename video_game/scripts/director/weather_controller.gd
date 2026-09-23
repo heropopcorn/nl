@@ -39,8 +39,9 @@ var _village: VillageSandbox
 
 
 ## Maps the 0–1 wind strength slider to a visual multiplier of the original
-## maximum wind: the weakest wind reads at 2/3 of it, the strongest at 3x.
-## Keep in sync with the same mapping in wind.gdshader.
+## maximum wind strands: the weakest wind reads at 2/3 of it, the strongest at
+## 3x. Keep in sync with the same mapping in wind.gdshader. Rain tilt uses the
+## raw strength instead (0°–60°, see RainDropOverlay._fall_direction).
 static func wind_visual_scale(strength: float) -> float:
 	return lerpf(2.0 / 3.0, 3.0, clampf(strength, 0.0, 1.0))
 
