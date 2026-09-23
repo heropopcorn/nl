@@ -20,22 +20,29 @@ vec2 gust_layer(vec2 q, float clock, vec2 cell, float layer_rate, float seed, fl
 	// Cells stay fixed in space. Time controls how much of a strand has been
 	// written and erased; it never translates the completed curve as a whole.
 	vec2 fixed_pos = q + vec2(seed * 0.071, seed * 0.043);
-	vec2 id = floor(fixed_pos / cell);
+	vec2 spatial_id = floor(fixed_pos / cell);
 	vec2 f = fract(fixed_pos / cell);
-	float random_a = hash21(id + vec2(seed, 2.7));
-	float random_b = hash21(id + vec2(5.1, seed));
-	float keep = step(1.0 - density, random_a);
 	// The former maximum (0.22) is now the baseline. An exponential mapping
 	// keeps the lower half controllable while making the top exactly 20x faster.
 	float speed_scale = pow(20.0, clamp(wind_speed, 0.0, 1.0));
 	float cycle_rate = 0.22 * speed_scale * mix(0.88, 1.12, layer_rate);
-	float life_phase = fract(clock * cycle_rate + hash21(id + vec2(seed, 39.1)) * 0.97);
+	float cycle_position = clock * cycle_rate + hash21(spatial_id + vec2(seed, 39.1)) * 0.97;
+	float cycle_index = floor(cycle_position);
+	float life_phase = fract(cycle_position);
+	// Fold the cycle number into every event hash. A cell therefore chooses a
+	// new position, silhouette and visibility on each pass instead of replaying
+	// the same recognisable mark forever.
+	vec2 id = spatial_id + vec2(cycle_index * 13.37, cycle_index * 7.91);
+	float random_a = hash21(id + vec2(seed, 2.7));
+	float random_b = hash21(id + vec2(5.1, seed));
+	float keep = step(1.0 - density, random_a);
 	float head_progress = clamp(life_phase / 0.58, 0.0, 1.0);
 	float tail_progress = clamp((life_phase - 0.28) / 0.72, 0.0, 1.0);
 
-	float start_x = 0.05 + random_b * 0.10;
-	float end_x = 0.72 + hash21(id + vec2(9.3, seed)) * 0.23;
-	float base_y = 0.34 + hash21(id + vec2(seed, 11.9)) * 0.32;
+	float start_x = 0.02 + random_b * 0.27;
+	float strand_length = 0.46 + hash21(id + vec2(9.3, seed)) * 0.38;
+	float end_x = min(start_x + strand_length, 0.98);
+	float base_y = 0.10 + hash21(id + vec2(seed, 11.9)) * 0.80;
 	float phase = hash21(id + vec2(17.2, seed)) * PI * 2.0;
 	float shape_style = hash21(id + vec2(seed, 18.8));
 	float bow_random = hash21(id + vec2(seed, 21.4));

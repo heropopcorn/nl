@@ -1,9 +1,9 @@
 class_name WeatherController
 extends CanvasLayer
 
-## Screen-space time-of-day grading and full-screen falling rain. Each framed
-## rain region also supplies interior impact targets whose drops and optional
-## splashes are animated as one event.
+## Screen-space time-of-day grading plus region-targeted falling rain. Each
+## framed rain region supplies per-cycle random impact targets whose drops and
+## optional splashes are animated as one event.
 
 const RAIN_SHADER_PATH := "res://shaders/rain.gdshader"
 const DAY_SHADER_PATH := "res://shaders/day_cycle.gdshader"
