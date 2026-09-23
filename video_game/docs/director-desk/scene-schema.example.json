@@ -159,6 +159,7 @@
     "enabled": true,
     "type": "rain",
     "intensity": 0.6,
+    "rain_density": 0.6,
     "time_of_day": "evening",
     "moonlight_enabled": true,
     "moonlight_intensity": 0.65,

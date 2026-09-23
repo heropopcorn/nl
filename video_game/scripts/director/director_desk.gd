@@ -605,6 +605,7 @@ func run_runtime_selftest() -> PackedStringArray:
 	model.weather["enabled"] = true
 	model.weather["type"] = "rain"
 	model.weather["intensity"] = 0.9
+	model.weather["rain_density"] = 0.72
 	model.weather["time_of_day"] = "night"
 	model.weather["moonlight_enabled"] = true
 	model.weather["moonlight_intensity"] = 0.72
@@ -628,7 +629,8 @@ func run_runtime_selftest() -> PackedStringArray:
 	if not bool(rain_roundtrip.weather.get("lightning_enabled", false)) \
 		or not bool(rain_roundtrip.weather.get("wind_enabled", false)) \
 		or DirectorSceneModel._vec2(rain_roundtrip.weather.get("wind_direction", [0, 0]), Vector2.ZERO).dot(Vector2.LEFT) < 0.99 \
-		or absf(float(rain_roundtrip.weather.get("wind_speed", 0.0)) - 0.65) > 0.001:
+		or absf(float(rain_roundtrip.weather.get("wind_speed", 0.0)) - 0.65) > 0.001 \
+		or absf(float(rain_roundtrip.weather.get("rain_density", 0.0)) - 0.72) > 0.001:
 		errors.append("lightning/wind settings did not survive scene round-trip")
 	_apply_weather_effects()
 	weather.set_director_time(0.0)
@@ -655,6 +657,8 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("paired rain did not preserve splash and silent targets")
 	elif paired_rain.target_vertical_span() < 0.05:
 		errors.append("paired rain targets did not cover different travel heights")
+	elif paired_rain.target_cycle_shift() < 0.005:
+		errors.append("rain targets did not change between cycles")
 	if weather.lightning_flash_amount() < 0.75:
 		errors.append("lightning double-flash envelope was not applied")
 	var lightning_overlay := weather.get_node_or_null("LightningOverlay") as ColorRect
@@ -2591,9 +2595,9 @@ func _fill_weather_tab() -> void:
 		_end_cmd()
 		_apply_weather_effects()
 	))
-	inner.add_child(_label("天气效果：全屏下雨", 13, false))
-	inner.add_child(_label("雨线始终覆盖整个屏幕并从上往下落；框定区域只负责雨滴终点和落点反馈。关闭天气不影响所选时段。", 12, false, true))
-	inner.add_child(_label("强度", 13, true))
+	inner.add_child(_label("天气效果：区域落雨", 13, false))
+	inner.add_child(_label("每轮雨滴会在框定区域内重新选择随机落点；每滴雨都有终点，不会凭空划过屏幕。关闭天气不影响所选时段。", 12, false, true))
+	inner.add_child(_label("雨水强度（速度、粗细与水花大小）", 13, true))
 	var sl := HSlider.new()
 	sl.min_value = 0
 	sl.max_value = 1
@@ -2607,6 +2611,20 @@ func _fill_weather_tab() -> void:
 	)
 	sl.drag_ended.connect(func(_c: bool) -> void: _end_cmd())
 	inner.add_child(sl)
+	inner.add_child(_label("雨水密度（雨滴与落点数量）", 13, true))
+	var rain_density := HSlider.new()
+	rain_density.min_value = 0.0
+	rain_density.max_value = 1.0
+	rain_density.step = 0.01
+	rain_density.value = float(model.weather.get("rain_density", 0.6))
+	rain_density.drag_started.connect(_begin_cmd)
+	rain_density.value_changed.connect(func(v: float) -> void:
+		if _loading: return
+		model.weather["rain_density"] = v
+		_apply_weather_effects()
+	)
+	rain_density.drag_ended.connect(func(_c: bool) -> void: _end_cmd())
+	inner.add_child(rain_density)
 	inner.add_child(HSeparator.new())
 	inner.add_child(_label("雷电闪光", 13, true))
 	inner.add_child(_checkbox("下雨时启用打闪", bool(model.weather.get("lightning_enabled", false)), func(v: bool) -> void:
@@ -2701,7 +2719,7 @@ func _fill_weather_tab() -> void:
 	create_row.add_child(_btn("圈选（有水花）", func() -> void: _start_rain_lasso(true)))
 	create_row.add_child(_btn("圈选（无水花）", func() -> void: _start_rain_lasso(false)))
 	inner.add_child(create_row)
-	inner.add_child(_label("例：沿屋顶轮廓圈选后，雨幕仍覆盖屏幕，但雨滴会在屋顶范围形成终点；树冠可关闭水花，地面可开启。", 12, false, true))
+	inner.add_child(_label("例：沿屋顶轮廓圈选后，雨滴会随机落在屋顶范围；树冠可关闭水花，地面可开启。", 12, false, true))
 	var region := _rain_by_id(selected_rain_id)
 	if region.is_empty():
 		inner.add_child(_label("尚未选择降雨区域；可在上方开始圈选，或从 Hierarchy 选择。", 12, false, true))
