@@ -185,6 +185,8 @@ func setup(host: VillageSandbox) -> void:
 	if get_viewport():
 		get_viewport().size_changed.connect(_apply_layout)
 	village.hide_legacy_water()
+	if village.camera and "wheel_zoom_enabled" in village.camera:
+		village.camera.wheel_zoom_enabled = false
 	_apply_layout()
 	_set_save_status("saved")
 	_set_status("导演台已就绪。数据保存在本机。")
@@ -462,6 +464,19 @@ func run_runtime_selftest() -> PackedStringArray:
 	_sync_world()
 	if village.camera.offset.distance_to(Vector2(137.0, -83.0)) > 0.1 or absf(village.camera.zoom.x - 1.72) > 0.001:
 		errors.append("Inspector update recentered camera view")
+	if _right and _right.is_visible_in_tree() and _right.get_global_rect().has_area():
+		# Wheel-scrolling the Inspector (including past its scroll limits) must
+		# never zoom the canvas behind it.
+		var panel_point := _right.get_global_rect().get_center()
+		for button in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_UP]:
+			var wheel := InputEventMouseButton.new()
+			wheel.button_index = button
+			wheel.pressed = true
+			wheel.position = panel_point
+			wheel.global_position = panel_point
+			get_viewport().push_input(wheel)
+		if absf(village.camera.zoom.x - 1.72) > 0.001:
+			errors.append("wheel over Inspector zoomed the canvas")
 	preserved_player = actors.player_for(preserved_actor_id)
 	if preserved_player and preserved_player.position.distance_to(preserved_actor_position) > 0.1:
 		errors.append("Inspector update reset actor position")
