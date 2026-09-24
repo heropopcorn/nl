@@ -27,7 +27,32 @@ const DEFAULT_START_UV := Vector2(0.42, 0.42)
 const PRESET_VILLAGE := "village_default"
 const PRESET_PROTAGONIST_VILLAGE := "protagonist_village"
 const PRESET_VILLAGE_SCHOOL := "village_school"
-const KNOWN_PRESET_BACKGROUNDS := [PRESET_VILLAGE, PRESET_PROTAGONIST_VILLAGE, PRESET_VILLAGE_SCHOOL]
+const KNOWN_PRESET_BACKGROUNDS := [PRESET_VILLAGE, PRESET_PROTAGONIST_VILLAGE, PRESET_VILLAGE_SCHOOL,
+	"protagonist_village_spring_early",
+	"protagonist_village_spring_mid",
+	"protagonist_village_spring_late",
+	"protagonist_village_summer_early",
+	"protagonist_village_summer_mid",
+	"protagonist_village_summer_late",
+	"protagonist_village_autumn_early",
+	"protagonist_village_autumn_mid",
+	"protagonist_village_autumn_late",
+	"protagonist_village_winter_early",
+	"protagonist_village_winter_mid",
+	"protagonist_village_winter_late",
+	"village_school_spring_early",
+	"village_school_spring_mid",
+	"village_school_spring_late",
+	"village_school_summer_early",
+	"village_school_summer_mid",
+	"village_school_summer_late",
+	"village_school_autumn_early",
+	"village_school_autumn_mid",
+	"village_school_autumn_late",
+	"village_school_winter_early",
+	"village_school_winter_mid",
+	"village_school_winter_late"
+]
 const PRESET_PIXEL := Vector2i(1152, 864)
 const BLANK_PIXEL := Vector2i(1152, 864)
 const BLANK_FILL := Color(0.45, 0.50, 0.40, 1.0)

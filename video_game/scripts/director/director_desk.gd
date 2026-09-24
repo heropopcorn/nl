@@ -13,6 +13,8 @@ const LEFT_W := 250.0
 const RIGHT_W := 300.0
 const TOOL_W := 82.0
 const NARROW := 900.0
+const SEASON_STAGES := ["spring_early", "spring_mid", "spring_late", "summer_early", "summer_mid", "summer_late", "autumn_early", "autumn_mid", "autumn_late", "winter_early", "winter_mid", "winter_late"]
+const SEASON_LABELS := ["初春", "仲春", "晚春", "初夏", "仲夏", "晚夏", "初秋", "仲秋", "晚秋", "初冬", "仲冬", "晚冬"]
 const BUILTIN_BACKGROUNDS := [
 	{
 		"id": "background_protagonist_village",
@@ -28,6 +30,30 @@ const BUILTIN_BACKGROUNDS := [
 		"preset_id": DirectorSceneModel.PRESET_VILLAGE_SCHOOL,
 		"path": "res://art/backgrounds/village_school.png",
 	},
+	{"id": "background_protagonist_village_spring_early", "name": "村庄·初春", "category": "backgrounds", "preset_id": "protagonist_village_spring_early", "path": "res://art/backgrounds/seasons/protagonist_village_spring_early.png"},
+	{"id": "background_protagonist_village_spring_mid", "name": "村庄·仲春", "category": "backgrounds", "preset_id": "protagonist_village_spring_mid", "path": "res://art/backgrounds/seasons/protagonist_village_spring_mid.png"},
+	{"id": "background_protagonist_village_spring_late", "name": "村庄·晚春", "category": "backgrounds", "preset_id": "protagonist_village_spring_late", "path": "res://art/backgrounds/seasons/protagonist_village_spring_late.png"},
+	{"id": "background_protagonist_village_summer_early", "name": "村庄·初夏", "category": "backgrounds", "preset_id": "protagonist_village_summer_early", "path": "res://art/backgrounds/seasons/protagonist_village_summer_early.png"},
+	{"id": "background_protagonist_village_summer_mid", "name": "村庄·仲夏", "category": "backgrounds", "preset_id": "protagonist_village_summer_mid", "path": "res://art/backgrounds/seasons/protagonist_village_summer_mid.png"},
+	{"id": "background_protagonist_village_summer_late", "name": "村庄·晚夏", "category": "backgrounds", "preset_id": "protagonist_village_summer_late", "path": "res://art/backgrounds/seasons/protagonist_village_summer_late.png"},
+	{"id": "background_protagonist_village_autumn_early", "name": "村庄·初秋", "category": "backgrounds", "preset_id": "protagonist_village_autumn_early", "path": "res://art/backgrounds/seasons/protagonist_village_autumn_early.png"},
+	{"id": "background_protagonist_village_autumn_mid", "name": "村庄·仲秋", "category": "backgrounds", "preset_id": "protagonist_village_autumn_mid", "path": "res://art/backgrounds/seasons/protagonist_village_autumn_mid.png"},
+	{"id": "background_protagonist_village_autumn_late", "name": "村庄·晚秋", "category": "backgrounds", "preset_id": "protagonist_village_autumn_late", "path": "res://art/backgrounds/seasons/protagonist_village_autumn_late.png"},
+	{"id": "background_protagonist_village_winter_early", "name": "村庄·初冬", "category": "backgrounds", "preset_id": "protagonist_village_winter_early", "path": "res://art/backgrounds/seasons/protagonist_village_winter_early.png"},
+	{"id": "background_protagonist_village_winter_mid", "name": "村庄·仲冬", "category": "backgrounds", "preset_id": "protagonist_village_winter_mid", "path": "res://art/backgrounds/seasons/protagonist_village_winter_mid.png"},
+	{"id": "background_protagonist_village_winter_late", "name": "村庄·晚冬", "category": "backgrounds", "preset_id": "protagonist_village_winter_late", "path": "res://art/backgrounds/seasons/protagonist_village_winter_late.png"},
+	{"id": "background_village_school_spring_early", "name": "学校·初春", "category": "backgrounds", "preset_id": "village_school_spring_early", "path": "res://art/backgrounds/seasons/village_school_spring_early.png"},
+	{"id": "background_village_school_spring_mid", "name": "学校·仲春", "category": "backgrounds", "preset_id": "village_school_spring_mid", "path": "res://art/backgrounds/seasons/village_school_spring_mid.png"},
+	{"id": "background_village_school_spring_late", "name": "学校·晚春", "category": "backgrounds", "preset_id": "village_school_spring_late", "path": "res://art/backgrounds/seasons/village_school_spring_late.png"},
+	{"id": "background_village_school_summer_early", "name": "学校·初夏", "category": "backgrounds", "preset_id": "village_school_summer_early", "path": "res://art/backgrounds/seasons/village_school_summer_early.png"},
+	{"id": "background_village_school_summer_mid", "name": "学校·仲夏", "category": "backgrounds", "preset_id": "village_school_summer_mid", "path": "res://art/backgrounds/seasons/village_school_summer_mid.png"},
+	{"id": "background_village_school_summer_late", "name": "学校·晚夏", "category": "backgrounds", "preset_id": "village_school_summer_late", "path": "res://art/backgrounds/seasons/village_school_summer_late.png"},
+	{"id": "background_village_school_autumn_early", "name": "学校·初秋", "category": "backgrounds", "preset_id": "village_school_autumn_early", "path": "res://art/backgrounds/seasons/village_school_autumn_early.png"},
+	{"id": "background_village_school_autumn_mid", "name": "学校·仲秋", "category": "backgrounds", "preset_id": "village_school_autumn_mid", "path": "res://art/backgrounds/seasons/village_school_autumn_mid.png"},
+	{"id": "background_village_school_autumn_late", "name": "学校·晚秋", "category": "backgrounds", "preset_id": "village_school_autumn_late", "path": "res://art/backgrounds/seasons/village_school_autumn_late.png"},
+	{"id": "background_village_school_winter_early", "name": "学校·初冬", "category": "backgrounds", "preset_id": "village_school_winter_early", "path": "res://art/backgrounds/seasons/village_school_winter_early.png"},
+	{"id": "background_village_school_winter_mid", "name": "学校·仲冬", "category": "backgrounds", "preset_id": "village_school_winter_mid", "path": "res://art/backgrounds/seasons/village_school_winter_mid.png"},
+	{"id": "background_village_school_winter_late", "name": "学校·晚冬", "category": "backgrounds", "preset_id": "village_school_winter_late", "path": "res://art/backgrounds/seasons/village_school_winter_late.png"},
 ]
 const HELP_TEXT := """导演台 Layout V3
 
@@ -416,7 +442,24 @@ func run_runtime_selftest() -> PackedStringArray:
 			errors.append("built-in background selection did not update preset")
 		if village.terrain_size() != Vector2(1536, 1024) or not village.hide_baked_props:
 			errors.append("built-in background image was not applied cleanly")
+		var restored := DirectorSceneModel.from_json_text(model.to_json_text())
+		if str(restored.background.get("preset_id", "")) != str(background.get("preset_id", "")) or not restored.is_valid():
+			errors.append("built-in background preset did not survive save roundtrip")
 	var first_id := model.scene_id
+	var season_objects := JSON.stringify([model.actors, model.elements, model.water_regions, model.background_regions, model.rain_regions, model.weather])
+	var season_offset := village.camera.offset
+	var season_zoom := village.camera.zoom
+	for stage in range(SEASON_STAGES.size()):
+		_set_season(stage)
+		if str(model.background.get("preset_id", "")) != "village_school_" + str(SEASON_STAGES[stage]):
+			errors.append("season control selected wrong background")
+		if JSON.stringify([model.actors, model.elements, model.water_regions, model.background_regions, model.rain_regions, model.weather]) != season_objects:
+			errors.append("season control changed scene objects or weather")
+		if village.camera.offset != season_offset or village.camera.zoom != season_zoom:
+			errors.append("season control reset editor view")
+	_set_season(-1)
+	if str(model.background.get("preset_id", "")) != DirectorSceneModel.PRESET_VILLAGE_SCHOOL:
+		errors.append("season control failed to restore original")
 	var blank := temp.create_blank_scene("空白测试")
 	if blank == null:
 		errors.append("runtime blank create failed")
@@ -1405,7 +1448,7 @@ func _apply_builtin_background(background: Dictionary) -> void:
 		"file": null,
 		"pixel_size": [int(size.x), int(size.y)],
 	}
-	# 两张新背景已经包含建筑，不能再叠加旧村庄的内置道具。
+	# 默认背景已包含建筑，不能再叠加旧村庄的内置道具。
 	model.editor["show_baked_props"] = false
 	_end_cmd()
 	_sync_world()
@@ -2343,6 +2386,7 @@ func _fill_scene_tab() -> void:
 			var region_id := str(item.get("id", ""))
 			inner.add_child(_btn("选择 · " + str(item.get("name", "底图区域")), func() -> void: _select_hierarchy("background_region", region_id)))
 	inner.add_child(_btn("更换背景", _open_replace_background))
+	_add_season_controls(inner)
 	inner.add_child(_btn("空白画布", _replace_with_blank))
 	inner.add_child(_label("摆放元素", 13, true))
 	inner.add_child(_label("请从左下资源列表选择素材，再到画布点击放置。", 12, false, true))
@@ -2630,6 +2674,74 @@ func _fill_actor_tab() -> void:
 	))
 
 
+func _season_family() -> String:
+	if model == null or str(model.background.get("source", "")) != "preset":
+		return ""
+	var preset := str(model.background.get("preset_id", ""))
+	for family in [DirectorSceneModel.PRESET_PROTAGONIST_VILLAGE, DirectorSceneModel.PRESET_VILLAGE_SCHOOL]:
+		if preset == family or preset.begins_with(family + "_"):
+			return family
+	return ""
+
+
+func _set_season(stage: int) -> void:
+	if _loading or _preview_locked_edits():
+		return
+	var family := _season_family()
+	if family.is_empty() or stage < -1 or stage >= SEASON_STAGES.size():
+		return
+	var preset := family if stage == -1 else family + "_" + str(SEASON_STAGES[stage])
+	var background := _builtin_background_by_preset(preset)
+	if background.is_empty() or not ResourceLoader.exists(str(background.get("path", ""))):
+		_set_status("此时节的背景图片不存在。")
+		return
+	_begin_cmd()
+	# Only swap the image identity; retain all scene objects, weather and regions.
+	model.background["preset_id"] = preset
+	_sync_world()
+	_end_cmd()
+	_set_status("时节：" + ("原始背景" if stage == -1 else str(SEASON_LABELS[stage])))
+
+
+func _add_season_controls(inner: VBoxContainer) -> void:
+	inner.add_child(_label("时节 / 全年进度", 13, true))
+	var family := _season_family()
+	if family.is_empty():
+		inner.add_child(_label("此背景暂无配套时节图。村庄、村庄学校支持四季切换。", 12, false, true))
+		return
+	var preset := str(model.background.get("preset_id", ""))
+	var stage := SEASON_STAGES.find(preset.trim_prefix(family + "_"))
+	var select := OptionButton.new()
+	select.add_item("原始背景")
+	for label in SEASON_LABELS:
+		select.add_item(str(label))
+	select.select(stage + 1)
+	select.disabled = _preview_locked_edits()
+	inner.add_child(select)
+	var caption := _label("原始背景（拖动后选择时节）" if stage == -1 else str(SEASON_LABELS[stage]), 12, false)
+	inner.add_child(caption)
+	var slider := HSlider.new()
+	slider.min_value = -1
+	slider.max_value = 11
+	slider.step = 1
+	slider.tick_count = 13
+	slider.value = stage
+	slider.editable = not _preview_locked_edits()
+	slider.tooltip_text = "初春 → 仲春 → 晚春 → 初夏 → … → 晚冬；每格切换一张背景图"
+	inner.add_child(slider)
+	inner.add_child(_label("春 → 夏 → 秋 → 冬（初 / 仲 / 晚）", 12, false))
+	select.item_selected.connect(func(index: int) -> void:
+		_set_season(index - 1)
+		_refresh_inspector.call_deferred()
+	)
+	slider.value_changed.connect(func(value: float) -> void:
+		_set_season(int(value))
+		select.select(int(value) + 1)
+		caption.text = "原始背景" if int(value) == -1 else str(SEASON_LABELS[int(value)])
+	)
+	slider.drag_ended.connect(func(_changed: bool) -> void: _refresh_inspector.call_deferred())
+
+
 func _fill_weather_tab() -> void:
 	var inner := _tab_inner(3)
 	if inner == null:
@@ -2638,6 +2750,7 @@ func _fill_weather_tab() -> void:
 	inner.add_child(_label("环境与天气", 14, true))
 	if model == null:
 		return
+	_add_season_controls(inner)
 	inner.add_child(_label("时段", 13, true))
 	var time_select := OptionButton.new()
 	var times := [["早晨", "morning"], ["中午", "noon"], ["傍晚", "evening"], ["夜晚", "night"]]

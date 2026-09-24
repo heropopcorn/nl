@@ -116,7 +116,7 @@ func _test_layout_v3_assets_and_fields() -> PackedStringArray:
 			or not is_equal_approx(float(again.weather.get("moonlight_intensity", 0.0)), 0.72) \
 			or not is_equal_approx(float(again.weather.get("rain_density", 0.0)), 0.37):
 		errors.append("weather and rain density roundtrip failed")
-	for preset_id in [DirectorSceneModel.PRESET_PROTAGONIST_VILLAGE, DirectorSceneModel.PRESET_VILLAGE_SCHOOL]:
+	for preset_id in DirectorSceneModel.KNOWN_PRESET_BACKGROUNDS:
 		var preset_model := _valid_stub()
 		preset_model.background = {"source": "preset", "preset_id": preset_id, "file": null, "pixel_size": [1536, 1024]}
 		preset_model.validate()
