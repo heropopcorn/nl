@@ -3,7 +3,7 @@ extends Control
 
 ## Director Desk Layout V3: hierarchy/resources, inspector, project browser and canvas tools.
 
-enum Mode { SELECT, BOX_WATER, LASSO_WATER, LASSO_REGION, LASSO_RAIN, EDIT_ROUTE, SCALE, ROTATE, PREVIEW }
+enum Mode { SELECT, BOX_WATER, LASSO_WATER, LASSO_REGION, LASSO_RAIN, EDIT_ROUTE, SCALE, ROTATE, PREVIEW, DRAW_FLOW }
 enum DragKind { NONE, WATER_MOVE, WATER_RESIZE, WATER_DIR, WATER_POINT, RAIN_POINT, ROUTE_POINT, ELEMENT_MOVE, ELEMENT_SCALE, ELEMENT_ROTATE, BOX }
 
 const HANDLE := 8.0
@@ -72,6 +72,10 @@ var selected_kind := "background"
 var selected_chapter_id := ""
 var selected_point := -2
 var _lasso_points: PackedVector2Array = PackedVector2Array()
+# Flow line being drawn for the selected water region (UV space).
+var _flow_points: PackedVector2Array = PackedVector2Array()
+var _flow_stroke := false
+var _flow_stroke_dragged := false
 var _search_query := ""
 var _save_status := "saved"
 var _status_text := ""
@@ -272,7 +276,22 @@ func render_gizmos(canvas: Node2D) -> void:
 					canvas.draw_circle(point, handle * 0.7, Color.WHITE)
 			else:
 				_draw_handles(canvas, rect, handle)
-			_draw_flow_arrow(canvas, region, rect, handle)
+			var flow_lines := water.world_flow_lines_of(region)
+			if flow_lines.is_empty():
+				_draw_flow_arrow(canvas, region, rect, handle)
+			else:
+				_draw_flow_field(canvas, rid, poly, rect, zoom)
+				for line in flow_lines:
+					_draw_flow_line(canvas, line, zoom, Color(1.0, 0.78, 0.30, 0.95))
+	if mode == Mode.DRAW_FLOW and not _flow_points.is_empty():
+		var live_flow := PackedVector2Array()
+		for point in _flow_points:
+			live_flow.append(village.uv_to_world(point))
+		if not _flow_stroke:
+			live_flow.append(village.get_global_mouse_position())
+		_draw_flow_line(canvas, live_flow, zoom, Color(1.0, 0.92, 0.55, 0.95))
+		for point in live_flow:
+			canvas.draw_circle(point, handle * 0.45, Color(1.0, 0.95, 0.7, 1.0))
 	for region in model.background_regions:
 		var rid := str(region.get("id", ""))
 		var poly := PackedVector2Array()
@@ -425,6 +444,7 @@ func run_runtime_selftest() -> PackedStringArray:
 	var dir_b := water.material_flow_dir("water_b")
 	if dir_a.dot(Vector2(0, 1)) < 0.9 or dir_b.dot(Vector2(1, 0)) < 0.9:
 		errors.append("water materials not isolated at create")
+	errors.append_array(_selftest_flow_lines())
 	if water.material_current_strength("water_a") < 0.9 or water.material_current_strength("water_b") < 0.9:
 		errors.append("water current streak layer should be visibly enabled")
 	_begin_cmd()
@@ -1561,8 +1581,17 @@ func _unhandled_input(event: InputEvent) -> void:
 			_pop_route_point()
 			get_viewport().set_input_as_handled()
 			return
+		if key == KEY_BACKSPACE and mode == Mode.DRAW_FLOW:
+			if not _flow_points.is_empty():
+				_flow_points.remove_at(_flow_points.size() - 1)
+			get_viewport().set_input_as_handled()
+			return
 		if key == KEY_ENTER and mode in [Mode.LASSO_WATER, Mode.LASSO_REGION, Mode.LASSO_RAIN]:
 			_finish_lasso()
+			get_viewport().set_input_as_handled()
+			return
+		if key == KEY_ENTER and mode == Mode.DRAW_FLOW:
+			_finish_flow_line()
 			get_viewport().set_input_as_handled()
 			return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -1624,9 +1653,17 @@ func _on_left_mouse(event: InputEventMouseButton) -> void:
 			_click_route(world)
 			get_viewport().set_input_as_handled()
 			return
+		if mode == Mode.DRAW_FLOW:
+			_press_flow_line(world, event.double_click)
+			get_viewport().set_input_as_handled()
+			return
 		_click_select(world)
 		get_viewport().set_input_as_handled()
 	else:
+		if mode == Mode.DRAW_FLOW:
+			_release_flow_line()
+			get_viewport().set_input_as_handled()
+			return
 		if _drag == DragKind.BOX:
 			_box_b = world
 			_box_b_screen = screen
@@ -1643,7 +1680,9 @@ func _on_mouse_move(_event: InputEventMouseMotion) -> void:
 	if model == null or _preview_locked_edits():
 		return
 	var world := village.get_global_mouse_position()
-	if _drag == DragKind.BOX:
+	if mode == Mode.DRAW_FLOW and _flow_stroke:
+		_extend_flow_stroke(world)
+	elif _drag == DragKind.BOX:
 		_box_b = world
 		_box_b_screen = _screen_mouse()
 	elif _drag == DragKind.WATER_MOVE:
@@ -1725,7 +1764,7 @@ func _click_select(world: Vector2) -> void:
 		if vertex >= 0:
 			_drag = DragKind.WATER_POINT
 			selected_point = vertex
-		elif _near(world, _arrow_tip(region, rect)):
+		elif DirectorSceneModel.flow_lines_of(region).is_empty() and _near(world, _arrow_tip(region, rect)):
 			_drag = DragKind.WATER_DIR
 		else:
 			var corner := _hit_corner(rect, world)
@@ -2440,21 +2479,23 @@ func _fill_water_tab() -> void:
 	)
 	inner.add_child(water_layer)
 	inner.add_child(_label("流向", 13, true))
-	var dirs := [
-		["上", Vector2(0, -1)], ["下", Vector2(0, 1)], ["左", Vector2(-1, 0)], ["右", Vector2(1, 0)],
-		["左上", Vector2(-1, -1)], ["右上", Vector2(1, -1)], ["左下", Vector2(-1, 1)], ["右下", Vector2(1, 1)],
-	]
-	var grid := GridContainer.new()
-	grid.columns = 4
-	for item in dirs:
-		var d: Vector2 = item[1]
-		grid.add_child(_btn(str(item[0]), func() -> void:
-			_begin_cmd()
-			_set_water_flow(selected_water_id, d)
-			_end_cmd()
-			_sync_world()
-		))
-	inner.add_child(grid)
+	var flow_lines: Array = region.get("flow_lines", [])
+	if flow_lines.is_empty():
+		inner.add_child(_label("未画流向线：整块水域按画布上的方向箭头流动（拖动箭头端点可改方向）。", 12, false, true))
+	else:
+		inner.add_child(_label("水流沿各条流向线的绘制方向流动；离哪条线越近受它影响越大，两线之间按合力方向流动。", 12, false, true))
+	inner.add_child(_btn("画流向线", _start_flow_drawing))
+	for i in flow_lines.size():
+		var index := i
+		var row := HBoxContainer.new()
+		var line_label := _label("流向线 %d（%d 点）" % [i + 1, (flow_lines[i] as Array).size()], 12, false)
+		line_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(line_label)
+		row.add_child(_btn("反向", func() -> void: _reverse_flow_line(index)))
+		row.add_child(_btn("删除", func() -> void: _remove_flow_line(index)))
+		inner.add_child(row)
+	if not flow_lines.is_empty():
+		inner.add_child(_btn("清除全部流向线", _clear_flow_lines))
 	inner.add_child(_label("流速", 13, true))
 	var speed := HSlider.new()
 	speed.min_value = 0
@@ -2855,6 +2896,12 @@ func _set_mode(next: Mode) -> void:
 		_placing_asset = false
 	if next not in [Mode.LASSO_WATER, Mode.LASSO_REGION, Mode.LASSO_RAIN]:
 		_lasso_points = PackedVector2Array()
+	if next != Mode.DRAW_FLOW:
+		_flow_points = PackedVector2Array()
+		_flow_stroke = false
+	elif _water_by_id(selected_water_id).is_empty():
+		_set_status("请先选中一块水域，再画流向线。")
+		return
 	mode = next
 	_refresh_mode_buttons()
 	_update_catcher()
@@ -2874,6 +2921,8 @@ func _set_mode(next: Mode) -> void:
 			_set_status("圈雨滴终点：雨幕始终全屏；框定屋顶、树木或地面，当前%s水花。" % ("显示" if _new_rain_splashes else "不显示"))
 		Mode.EDIT_ROUTE:
 			_set_status("编辑路线：左键加点，Backspace 删末点。")
+		Mode.DRAW_FLOW:
+			_set_status("画流向线：沿水流方向逐点点击，或按住拖动画出曲线；双击 / Enter / 松开拖动完成，Backspace 删末点，Esc 取消。")
 		Mode.SCALE:
 			_set_status("缩放 Ctrl/Cmd+T：选中图片元素，再拖动四角控制点。")
 		Mode.ROTATE:
@@ -2997,6 +3046,11 @@ func _on_escape() -> void:
 		_lasso_points = PackedVector2Array()
 		_set_mode(Mode.SELECT)
 		_set_status("已取消套索。")
+		return
+	if mode == Mode.DRAW_FLOW and not _flow_points.is_empty():
+		_flow_points = PackedVector2Array()
+		_flow_stroke = false
+		_set_status("已取消当前流向线；再按 Esc 退出画线。")
 		return
 	if mode != Mode.SELECT:
 		_set_mode(Mode.SELECT)
@@ -3512,13 +3566,16 @@ func _drag_move_water(world: Vector2) -> void:
 		for point in polygon:
 			moved.append(DirectorSceneModel.vec2_to_arr(point + delta))
 		region["points_uv"] = moved
+		_shift_flow_lines(region, delta)
 		return
 	var rect := DirectorSceneModel.rect_from_region(region)
+	var previous_position := rect.position
 	var uv := _maybe_snap_uv(village.world_to_uv(world + _drag_world_offset))
 	rect.position = uv - rect.size * 0.5
 	rect.position.x = clampf(rect.position.x, 0.0, 1.0 - rect.size.x)
 	rect.position.y = clampf(rect.position.y, 0.0, 1.0 - rect.size.y)
 	region["rect_uv"] = [rect.position.x, rect.position.y, rect.size.x, rect.size.y]
+	_shift_flow_lines(region, rect.position - previous_position)
 
 
 func _drag_resize_water(world: Vector2) -> void:
@@ -3555,6 +3612,189 @@ func _drag_water_dir(world: Vector2) -> void:
 	var rect := water.world_rect_of(region)
 	var center := rect.position + rect.size * 0.5
 	_set_water_flow(selected_water_id, world - center)
+
+
+func _start_flow_drawing() -> void:
+	_set_mode(Mode.DRAW_FLOW)
+
+
+func _selftest_flow_lines() -> PackedStringArray:
+	var errors: PackedStringArray = PackedStringArray()
+	selected_kind = "water"
+	selected_water_id = "water_a"
+	_set_mode(Mode.DRAW_FLOW)
+	if mode != Mode.DRAW_FLOW:
+		errors.append("flow line tool did not activate for the selected water")
+		return errors
+	var rect := water.world_rect_of(_water_by_id("water_a"))
+	var origin := rect.position
+	# Click mode: two clicks, then Enter.
+	_press_flow_line(origin + Vector2(20, 10), false)
+	_release_flow_line()
+	_press_flow_line(origin + Vector2(20, rect.size.y - 10), false)
+	_release_flow_line()
+	_finish_flow_line()
+	# Freehand: a dragged stroke finishes on release.
+	_press_flow_line(origin + Vector2(40, rect.size.y - 20), false)
+	_extend_flow_stroke(origin + Vector2(120, rect.size.y - 20))
+	_extend_flow_stroke(origin + Vector2(rect.size.x - 10, rect.size.y - 20))
+	_release_flow_line()
+	var lines: Array = _water_by_id("water_a").get("flow_lines", [])
+	if lines.size() != 2:
+		errors.append("flow line tool should create one clicked and one dragged line, got %d" % lines.size())
+		_set_mode(Mode.SELECT)
+		return errors
+	if not water.has_flow_map("water_a"):
+		errors.append("flow lines did not reach the water material")
+	var down := water.flow_direction_at("water_a", origin + Vector2(24, rect.size.y * 0.4))
+	var right := water.flow_direction_at("water_a", origin + Vector2(rect.size.x * 0.75, rect.size.y - 24))
+	if down.dot(Vector2.DOWN) < 0.9 or right.dot(Vector2.RIGHT) < 0.9:
+		errors.append("drawn flow lines did not steer the local flow: %s / %s" % [str(down), str(right)])
+	if water.baked_flow_direction("water_a", origin + Vector2(24, rect.size.y * 0.4)).dot(Vector2.DOWN) < 0.8:
+		errors.append("baked flow map disagrees with the flow field")
+	_undo()
+	if (_water_by_id("water_a").get("flow_lines", []) as Array).size() != 1:
+		errors.append("undo should remove the last flow line")
+	var region := _water_by_id("water_a")
+	var before_rect := DirectorSceneModel.rect_from_region(region)
+	var before_point := DirectorSceneModel._vec2(region["flow_lines"][0][0], Vector2.ZERO)
+	_begin_cmd()
+	_drag_world_offset = Vector2.ZERO
+	_drag_move_water(rect.position + rect.size * 0.5 + Vector2(-30, 12))
+	_end_cmd()
+	var after_rect := DirectorSceneModel.rect_from_region(region)
+	var after_point := DirectorSceneModel._vec2(region["flow_lines"][0][0], Vector2.ZERO)
+	if (after_point - before_point).distance_to(after_rect.position - before_rect.position) > 0.0001:
+		errors.append("moving water should carry its flow lines")
+	_undo()
+	_clear_flow_lines()
+	_set_mode(Mode.SELECT)
+	if not (_water_by_id("water_a").get("flow_lines", []) as Array).is_empty():
+		errors.append("clearing flow lines failed")
+	_sync_world()
+	return errors
+
+
+func _press_flow_line(world: Vector2, double_click: bool) -> void:
+	if _water_by_id(selected_water_id).is_empty():
+		_set_mode(Mode.SELECT)
+		return
+	if double_click and _flow_points.size() >= 2:
+		_finish_flow_line()
+		return
+	_flow_points.append(_maybe_snap_uv(village.world_to_uv(world)))
+	_flow_stroke = true
+	_flow_stroke_dragged = false
+	_set_status("流向线已有 %d 个点；双击或 Enter 完成，按住拖动可直接画曲线。" % _flow_points.size())
+
+
+func _extend_flow_stroke(world: Vector2) -> void:
+	if _flow_points.is_empty():
+		return
+	var zoom := village.camera.zoom.x if village.camera else 1.0
+	var last := village.uv_to_world(_flow_points[_flow_points.size() - 1])
+	if last.distance_to(world) < 14.0 / maxf(zoom, 0.2):
+		return
+	_flow_points.append(DirectorSceneModel.clamp_uv(village.world_to_uv(world)))
+	_flow_stroke_dragged = true
+
+
+func _release_flow_line() -> void:
+	if not _flow_stroke:
+		return
+	_flow_stroke = false
+	# A dragged stroke is a complete freehand line; clicks keep adding points.
+	if _flow_stroke_dragged and _flow_points.size() >= 2:
+		_finish_flow_line()
+
+
+func _finish_flow_line() -> void:
+	var region := _water_by_id(selected_water_id)
+	if region.is_empty():
+		_flow_points = PackedVector2Array()
+		_set_mode(Mode.SELECT)
+		return
+	if _flow_points.size() < 2:
+		_set_status("流向线至少需要 2 个点。")
+		return
+	var lines: Array = region.get("flow_lines", []).duplicate(true)
+	if lines.size() >= DirectorSceneModel.FLOW_LINES_MAX:
+		_set_status("每块水域最多 %d 条流向线。" % DirectorSceneModel.FLOW_LINES_MAX)
+		return
+	var world_points := PackedVector2Array()
+	for point in _flow_points:
+		world_points.append(village.uv_to_world(point))
+	# Freehand strokes carry far more points than the curve needs; fewer
+	# segments keep the flow-field bake fast.
+	world_points = _simplify_flow_points(FlowField.simplify(world_points, 3.0), DirectorSceneModel.FLOW_LINE_POINTS_MAX)
+	var line: Array = []
+	for point in world_points:
+		line.append(DirectorSceneModel.vec2_to_arr(DirectorSceneModel.clamp_uv(village.world_to_uv(point))))
+	lines.append(line)
+	_begin_cmd()
+	region["flow_lines"] = DirectorSceneModel.sanitize_flow_lines(lines)
+	_end_cmd()
+	_flow_points = PackedVector2Array()
+	_sync_world()
+	_refresh_inspector()
+	_set_status("已添加流向线（共 %d 条）；可继续画下一条，按 Esc 返回移动。" % (region["flow_lines"] as Array).size())
+
+
+func _simplify_flow_points(points: PackedVector2Array, limit: int) -> PackedVector2Array:
+	if points.size() <= limit:
+		return points
+	var out := PackedVector2Array()
+	for i in limit:
+		out.append(points[int(round(float(i) * float(points.size() - 1) / float(limit - 1)))])
+	return out
+
+
+func _reverse_flow_line(index: int) -> void:
+	var region := _water_by_id(selected_water_id)
+	var lines: Array = region.get("flow_lines", []).duplicate(true)
+	if index < 0 or index >= lines.size():
+		return
+	var line: Array = lines[index]
+	line.reverse()
+	_begin_cmd()
+	region["flow_lines"] = lines
+	_end_cmd()
+	_sync_world()
+	_refresh_inspector()
+
+
+func _remove_flow_line(index: int) -> void:
+	var region := _water_by_id(selected_water_id)
+	var lines: Array = region.get("flow_lines", []).duplicate(true)
+	if index < 0 or index >= lines.size():
+		return
+	lines.remove_at(index)
+	_begin_cmd()
+	region["flow_lines"] = lines
+	_end_cmd()
+	_sync_world()
+	_refresh_inspector()
+
+
+func _clear_flow_lines() -> void:
+	var region := _water_by_id(selected_water_id)
+	if region.is_empty():
+		return
+	_begin_cmd()
+	region["flow_lines"] = []
+	_end_cmd()
+	_sync_world()
+	_refresh_inspector()
+
+
+func _shift_flow_lines(region: Dictionary, delta: Vector2) -> void:
+	var moved: Array = []
+	for line in DirectorSceneModel.flow_lines_of(region):
+		var shifted: Array = []
+		for point in line:
+			shifted.append(DirectorSceneModel.vec2_to_arr(DirectorSceneModel.clamp_uv(point + delta)))
+		moved.append(shifted)
+	region["flow_lines"] = moved
 
 
 func _drag_water_point(world: Vector2) -> void:
@@ -3787,6 +4027,43 @@ func _draw_flow_arrow(canvas: Node2D, region: Dictionary, rect: Rect2, handle: f
 	canvas.draw_circle(tip, handle * 0.6, Color(0.9, 0.95, 1.0, 1))
 
 
+func _draw_flow_line(canvas: Node2D, line: PackedVector2Array, zoom: float, color: Color) -> void:
+	if line.size() < 2:
+		return
+	canvas.draw_polyline(line, color, 2.5 / zoom, true)
+	var tip := line[line.size() - 1]
+	var tail := line[line.size() - 2]
+	_draw_arrow_head(canvas, tail, tip, 12.0 / zoom, color, 2.5 / zoom)
+
+
+## Sparse arrows showing the combined direction the water will follow.
+func _draw_flow_field(canvas: Node2D, region_id: String, polygon: PackedVector2Array, rect: Rect2, zoom: float) -> void:
+	var spacing := maxf(46.0 / maxf(zoom, 0.2), minf(rect.size.x, rect.size.y) / 14.0)
+	var color := Color(0.80, 0.95, 1.0, 0.55)
+	var y := rect.position.y + spacing * 0.5
+	while y < rect.end.y:
+		var x := rect.position.x + spacing * 0.5
+		while x < rect.end.x:
+			var point := Vector2(x, y)
+			if polygon.size() < 3 or Geometry2D.is_point_in_polygon(point, polygon):
+				var dir := water.baked_flow_direction(region_id, point)
+				if dir != Vector2.ZERO:
+					var half := dir * spacing * 0.28
+					canvas.draw_line(point - half, point + half, color, 1.5 / zoom, true)
+					_draw_arrow_head(canvas, point - half, point + half, 6.0 / zoom, color, 1.5 / zoom)
+			x += spacing
+		y += spacing
+
+
+func _draw_arrow_head(canvas: Node2D, from: Vector2, to: Vector2, size: float, color: Color, width: float) -> void:
+	var dir := (to - from).normalized()
+	if dir == Vector2.ZERO:
+		return
+	var side := Vector2(-dir.y, dir.x)
+	canvas.draw_line(to, to - dir * size + side * size * 0.55, color, width, true)
+	canvas.draw_line(to, to - dir * size - side * size * 0.55, color, width, true)
+
+
 func _arrow_tip(region: Dictionary, rect: Rect2) -> Vector2:
 	var flow := DirectorSceneModel.normalize_flow(DirectorSceneModel._vec2(region.get("flow_dir", [0, 1]), Vector2(0, 1)))
 	var center := rect.position + rect.size * 0.5
@@ -3848,7 +4125,7 @@ func _pointer_over_canvas(screen_position: Vector2) -> bool:
 func _update_catcher() -> void:
 	if _canvas_catch == null:
 		return
-	var grab := mode == Mode.BOX_WATER or mode in [Mode.LASSO_WATER, Mode.LASSO_REGION, Mode.LASSO_RAIN] or mode == Mode.EDIT_ROUTE or mode == Mode.SCALE or mode == Mode.ROTATE or _drag != DragKind.NONE
+	var grab := mode == Mode.BOX_WATER or mode in [Mode.LASSO_WATER, Mode.LASSO_REGION, Mode.LASSO_RAIN, Mode.DRAW_FLOW] or mode == Mode.EDIT_ROUTE or mode == Mode.SCALE or mode == Mode.ROTATE or _drag != DragKind.NONE
 	_canvas_catch.mouse_filter = Control.MOUSE_FILTER_STOP if grab else Control.MOUSE_FILTER_PASS
 
 
