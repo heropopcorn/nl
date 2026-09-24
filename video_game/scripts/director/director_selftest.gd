@@ -22,6 +22,64 @@ func run_model_and_repo() -> PackedStringArray:
 	_collect(errors, _test_layout_v3_assets_and_fields())
 	_collect(errors, _test_v1_migration())
 	_collect(errors, _test_corrupt_recovery())
+	_collect(errors, _test_flow_lines())
+	return errors
+
+
+func _test_flow_lines() -> PackedStringArray:
+	var errors: PackedStringArray = PackedStringArray()
+	var model := _valid_stub()
+	var too_many: Array = []
+	for i in DirectorSceneModel.FLOW_LINES_MAX + 3:
+		too_many.append([[0.2, 0.2], [0.3, 0.3]])
+	model.water_regions = [{"id": "water_lines", "name": "弯河", "enabled": true, "shape": "rect", "rect_uv": [0.1, 0.1, 0.5, 0.5], "flow_dir": [0, 1], "flow_speed": 0.3, "collision_enabled": false, "layer": -15,
+		"flow_lines": [[[0.15, 0.15], [0.15, 0.55]], [[0.4, 0.4]], [[0.3, 0.3], [0.3, 0.3]], [[0.45, 0.55], [0.5, 0.3], [0.58, 0.2]]]}]
+	var again := DirectorSceneModel.from_json_text(model.to_json_text())
+	var lines: Array = again.water_regions[0].get("flow_lines", [])
+	if lines.size() != 2 or (lines[1] as Array).size() != 3:
+		errors.append("flow lines roundtrip should keep the two valid lines: %s" % str(lines))
+	elif not again.is_valid():
+		errors.append("flow line scene should validate: %s" % str(again.errors))
+	model.water_regions[0]["flow_lines"] = too_many
+	again = DirectorSceneModel.from_json_text(model.to_json_text())
+	if (again.water_regions[0].get("flow_lines", []) as Array).size() != DirectorSceneModel.FLOW_LINES_MAX:
+		errors.append("flow line count cap not applied")
+	model.water_regions[0].erase("flow_lines")
+	again = DirectorSceneModel.from_json_text(model.to_json_text())
+	if not (again.water_regions[0].get("flow_lines", null) as Array).is_empty():
+		errors.append("legacy water without flow lines should load with an empty list")
+
+	var down: Array[PackedVector2Array] = [PackedVector2Array([Vector2(0, 0), Vector2(0, 400)])]
+	if FlowField.direction_at(Vector2(30, 200), down, Vector2.RIGHT).dot(Vector2.DOWN) < 0.999:
+		errors.append("single flow line should set the direction")
+	if FlowField.direction_at(Vector2(30, 200), [] as Array[PackedVector2Array], Vector2.RIGHT).dot(Vector2.RIGHT) < 0.999:
+		errors.append("no flow lines should fall back to flow_dir")
+	var pair: Array[PackedVector2Array] = [
+		PackedVector2Array([Vector2(0, -1000), Vector2(0, 1000)]),
+		PackedVector2Array([Vector2(50, 0), Vector2(1000, 0)]),
+	]
+	var middle := FlowField.direction_at(Vector2(100, 100), pair, Vector2.UP)
+	if middle.dot(Vector2(1, 1).normalized()) < 0.999:
+		errors.append("equidistant point should follow the resultant of both lines: %s" % str(middle))
+	var near_first := FlowField.direction_at(Vector2(20, 200), pair, Vector2.UP)
+	var near_second := FlowField.direction_at(Vector2(400, 20), pair, Vector2.UP)
+	if near_first.dot(Vector2.DOWN) < 0.95 or near_second.dot(Vector2.RIGHT) < 0.95:
+		errors.append("nearer flow line should dominate: %s / %s" % [str(near_first), str(near_second)])
+	if near_first.dot(Vector2.DOWN) >= 0.99999:
+		errors.append("farther flow line should still contribute a little")
+	var bend: Array[PackedVector2Array] = [PackedVector2Array([Vector2(0, 0), Vector2(0, 200), Vector2(200, 200)])]
+	var at_corner := FlowField.direction_at(Vector2(-20, 220), bend, Vector2.UP)
+	if at_corner.dot(Vector2(1, 1).normalized()) < 0.9:
+		errors.append("flow should turn smoothly around a bend: %s" % str(at_corner))
+	var opposite: Array[PackedVector2Array] = [
+		PackedVector2Array([Vector2(0, 0), Vector2(0, 400)]),
+		PackedVector2Array([Vector2(100, 400), Vector2(100, 0)]),
+	]
+	if FlowField.direction_at(Vector2(50, 200), opposite, Vector2.RIGHT).length() < 0.99:
+		errors.append("opposing flow lines should not produce a zero direction")
+	var image := FlowField.bake(Rect2(0, 0, 400, 200), pair, Vector2.UP, 16)
+	if image.get_width() != 16 or image.get_height() != 8:
+		errors.append("flow map should keep the region aspect ratio")
 	return errors
 
 

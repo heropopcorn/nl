@@ -16,6 +16,8 @@ const RAIN_REGIONS_MAX := 64
 const ROUTE_POINTS_MAX := 256
 const WATER_MIN_PX := 8.0
 const FLOW_SPEED_MAX := 1.5
+const FLOW_LINES_MAX := 16
+const FLOW_LINE_POINTS_MAX := 64
 const ACTOR_SPEED_MIN := 20.0
 const ACTOR_SPEED_MAX := 600.0
 const ACTOR_SPEED_DEFAULT := 210.0
@@ -48,7 +50,7 @@ const KNOWN_EDITOR_KEYS := [
 	"show_baked_props", "water_collision_enabled", "snap_enabled", "snap_grid_px",
 ]
 const KNOWN_WATER_KEYS := [
-	"id", "name", "enabled", "shape", "rect_uv", "points_uv", "flow_dir", "flow_speed", "collision_enabled", "layer",
+	"id", "name", "enabled", "shape", "rect_uv", "points_uv", "flow_dir", "flow_lines", "flow_speed", "collision_enabled", "layer",
 ]
 const KNOWN_ACTOR_KEYS := [
 	"id", "character_id", "display_name", "enabled", "start_uv", "layer", "route",
@@ -442,6 +444,42 @@ static func normalize_flow(dir: Vector2) -> Vector2:
 	return dir.normalized()
 
 
+## Water flow guide lines: an array of polylines in UV space, each ordered
+## from upstream to downstream. Lines with fewer than two distinct points are
+## dropped; counts are capped so the baked flow field stays cheap.
+static func sanitize_flow_lines(value: Variant) -> Array:
+	var out: Array = []
+	if not value is Array:
+		return out
+	for raw_line in value:
+		if out.size() >= FLOW_LINES_MAX:
+			break
+		var line: Array = []
+		var last := Vector2(-1.0, -1.0)
+		for point in points_from_value(raw_line):
+			if line.size() >= FLOW_LINE_POINTS_MAX:
+				break
+			var p := clamp_uv(point)
+			if not line.is_empty() and p.distance_squared_to(last) < UV_EPS * UV_EPS:
+				continue
+			line.append(vec2_to_arr(p))
+			last = p
+		if line.size() >= 2:
+			out.append(line)
+	return out
+
+
+static func flow_lines_of(region: Dictionary) -> Array[PackedVector2Array]:
+	var out: Array[PackedVector2Array] = []
+	var raw: Variant = region.get("flow_lines", [])
+	if raw is Array:
+		for line in raw:
+			var points := points_from_value(line)
+			if points.size() >= 2:
+				out.append(points)
+	return out
+
+
 static func snap6(value: float) -> float:
 	return snappedf(value, 0.000001)
 
@@ -736,6 +774,7 @@ func _parse_water(data: Dictionary) -> Dictionary:
 		out["points_uv"] = poly_out
 	var flow := normalize_flow(_vec2(data.get("flow_dir", [0, 1]), Vector2(0, 1)))
 	out["flow_dir"] = vec2_to_arr(flow)
+	out["flow_lines"] = sanitize_flow_lines(data.get("flow_lines", []))
 	out["flow_speed"] = clampf(float(data.get("flow_speed", 0.22)), 0.0, FLOW_SPEED_MAX)
 	out["collision_enabled"] = bool(data.get("collision_enabled", true))
 	out["layer"] = _as_int(data.get("layer", -15), -15)
@@ -870,6 +909,7 @@ func _export_water(region: Dictionary) -> Dictionary:
 		"shape": str(region.get("shape", "rect")),
 		"rect_uv": region.get("rect_uv", [0, 0, 0.1, 0.1]),
 		"flow_dir": region.get("flow_dir", [0, 1]),
+		"flow_lines": sanitize_flow_lines(region.get("flow_lines", [])),
 		"flow_speed": snap6(float(region.get("flow_speed", 0.22))),
 		"collision_enabled": bool(region.get("collision_enabled", true)),
 		"layer": _as_int(region.get("layer", -15), -15),
