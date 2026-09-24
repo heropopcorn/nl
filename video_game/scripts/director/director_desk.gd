@@ -931,6 +931,8 @@ func _fill_top() -> void:
 	row.add_child(_drawer_scene_btn)
 	row.add_child(_drawer_prop_btn)
 	row.add_child(_btn("帮助", _show_help))
+	if OS.has_feature("web"):
+		row.add_child(_btn("账号", func() -> void: JavaScriptBridge.eval("window.location.assign('/login')")))
 
 
 func _fill_left() -> void:

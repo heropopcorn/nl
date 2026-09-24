@@ -123,12 +123,14 @@ The script finds Godot 4.7.2 (`GODOT_BIN`, `godot` on `PATH`, or a download), in
 Do not open `index.html` as a `file://` URL (the wasm/pck fetch will fail). From the repo root:
 
 ```bash
-python3 -m http.server 8080 --directory export/web
+npm start
 ```
 
 Then open http://127.0.0.1:8080/ and click the canvas once if WASD does not move the farmer (browser focus).
 
 ### Vercel
+
+网页现在需要管理员登录。部署前必须设置 `AUTH_SECRET`（至少 32 字符随机密钥），并重新部署；本地使用 `npm start`，普通静态文件服务器不会校验登录。详见 [登录与部署说明](docs/login.md)。
 
 [`vercel.json`](vercel.json) builds with `tools/export-web.sh` and serves `export/web` as a static site. Wasm is `Content-Type: application/wasm`; `.pck` is `application/octet-stream`. Linked GitHub repo: `heropopcorn/video_game`, Vercel project **`video-game`** (Hobby team `heropopcorn1-2663`). Vercel Authentication is off on this project so the HTML5 build can be opened without a Vercel login.
 

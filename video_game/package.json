@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node server/serve.mjs", "test:auth": "node --test server/auth.test.mjs" },
+  "dependencies": { "@vercel/functions": "^3.0.0" }
+}
