@@ -691,7 +691,7 @@ func run_runtime_selftest() -> PackedStringArray:
 		errors.append("wind speed did not reach the wind material")
 	if not weather.rain_has_paired_impacts():
 		errors.append("rain regions did not create paired target drops")
-	var paired_rain := weather.get_node_or_null("PairedRainDrops") as RainDropOverlay
+	var paired_rain := village.world.get_node_or_null("PairedRainDrops") as RainDropOverlay
 	if paired_rain == null or paired_rain.splash_target_count() == 0 or paired_rain.silent_target_count() == 0:
 		errors.append("paired rain did not preserve splash and silent targets")
 	elif paired_rain.target_vertical_span() < 0.05:
@@ -761,7 +761,7 @@ func run_runtime_selftest() -> PackedStringArray:
 		rain.set_director_time(1.35)
 		await village._await_render()
 		village._save_screenshot("director_desk_rain.png")
-		var paired_overlay := weather.get_node_or_null("PairedRainDrops") as RainDropOverlay
+		var paired_overlay := village.world.get_node_or_null("PairedRainDrops") as RainDropOverlay
 		if paired_overlay:
 			var impact_time := paired_overlay.first_splash_preview_time()
 			weather.set_director_time(impact_time)
