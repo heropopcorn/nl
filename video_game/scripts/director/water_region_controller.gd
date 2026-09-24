@@ -8,7 +8,8 @@ const WATER_COLOR := Color(92.0 / 255.0, 168.0 / 255.0, 210.0 / 255.0, 1.0)
 var village: VillageSandbox
 var _shader: Shader
 var _shared_texture: ImageTexture
-var _items: Dictionary = {} # id -> {sprite, body, material, region}
+var _items: Dictionary = {} # id -> {sprite, body, material, region, flow_lines, fallback}
+var _flow_cache: Dictionary = {} # id -> {key, texture}; survives rebuilds
 var director_time: float = 0.0
 
 
@@ -59,6 +60,48 @@ func material_flow_speed(region_id: String) -> float:
 	if mat == null:
 		return -1.0
 	return float(mat.get_shader_parameter("flow_speed"))
+
+
+## Local flow direction at a world position inside a spawned region; follows
+## the drawn flow lines, or the region's single flow direction without lines.
+func flow_direction_at(region_id: String, world_pos: Vector2) -> Vector2:
+	if not _items.has(region_id):
+		return Vector2.ZERO
+	var item: Dictionary = _items[region_id]
+	return FlowField.direction_at(world_pos, item["flow_lines"], item["fallback"])
+
+
+## Nearest-texel lookup in the baked flow map; cheap enough for per-frame
+## editor gizmos. Returns Vector2.ZERO outside the region's bounds.
+func baked_flow_direction(region_id: String, world_pos: Vector2) -> Vector2:
+	if not _items.has(region_id) or not _flow_cache.has(region_id):
+		return Vector2.ZERO
+	var rect: Rect2 = _items[region_id]["rect"]
+	var image: Image = _flow_cache[region_id]["image"]
+	var uv := (world_pos - rect.position) / rect.size
+	if uv.x < 0.0 or uv.y < 0.0 or uv.x > 1.0 or uv.y > 1.0:
+		return Vector2.ZERO
+	var x := clampi(int(uv.x * image.get_width()), 0, image.get_width() - 1)
+	var y := clampi(int(uv.y * image.get_height()), 0, image.get_height() - 1)
+	var texel := image.get_pixel(x, y)
+	return Vector2(texel.r * 2.0 - 1.0, texel.g * 2.0 - 1.0).normalized()
+
+
+func has_flow_map(region_id: String) -> bool:
+	if not _items.has(region_id):
+		return false
+	var mat: ShaderMaterial = _items[region_id].get("material")
+	return mat != null and mat.get_shader_parameter("flow_map") is Texture2D
+
+
+func world_flow_lines_of(region: Dictionary) -> Array[PackedVector2Array]:
+	var out: Array[PackedVector2Array] = []
+	for line in DirectorSceneModel.flow_lines_of(region):
+		var world_line := PackedVector2Array()
+		for point in line:
+			world_line.append(village.uv_to_world(point))
+		out.append(world_line)
+	return out
 
 
 func material_current_strength(region_id: String) -> float:
@@ -129,6 +172,9 @@ func _spawn(model: DirectorSceneModel, region: Dictionary, global_collision: boo
 		DirectorSceneModel._vec2(region.get("flow_dir", [0, 1]), Vector2(0, 1))
 	)
 	mat.set_shader_parameter("flow_dir", flow)
+	var flow_lines := world_flow_lines_of(region)
+	mat.set_shader_parameter("flow_map", _flow_map_for(str(region.get("id", "")), rect, flow_lines, flow))
+	mat.set_shader_parameter("has_flow_map", true)
 	mat.set_shader_parameter("flow_speed", float(region.get("flow_speed", 0.22)))
 	mat.set_shader_parameter("region_size", rect.size)
 	mat.set_shader_parameter("current_strength", 0.95)
@@ -164,7 +210,27 @@ func _spawn(model: DirectorSceneModel, region: Dictionary, global_collision: boo
 		"body": body,
 		"material": mat,
 		"region": region,
+		"flow_lines": flow_lines,
+		"fallback": flow,
+		"rect": rect,
 	}
+
+
+func _flow_map_for(region_id: String, rect: Rect2, lines: Array[PackedVector2Array], fallback: Vector2) -> Texture2D:
+	var relative: Array = []
+	for line in lines:
+		var shifted := PackedVector2Array()
+		for point in line:
+			shifted.append((point - rect.position).snapped(Vector2(0.01, 0.01)))
+		relative.append(shifted)
+	var key := var_to_str([rect.size.snapped(Vector2(0.01, 0.01)), relative, fallback])
+	var cached: Dictionary = _flow_cache.get(region_id, {})
+	if cached.get("key", "") == key:
+		return cached["texture"]
+	var image := FlowField.bake(rect, lines, fallback)
+	var texture := ImageTexture.create_from_image(image)
+	_flow_cache[region_id] = {"key": key, "texture": texture, "image": image}
+	return texture
 
 
 func _clear() -> void:
