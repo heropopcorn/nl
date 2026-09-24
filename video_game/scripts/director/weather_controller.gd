@@ -66,7 +66,7 @@ func setup(host: VillageSandbox = null) -> void:
 		_rain_overlay.material = _rain_material
 	add_child(_rain_overlay)
 	_rain_impacts = RainDropOverlay.new()
-	add_child(_rain_impacts)
+	_village.world.add_child(_rain_impacts)
 	_rain_impacts.setup(_village)
 	# Grade the complete scene, including wind and rain. At zero night ambient
 	# those effects disappear too; moonlight and lightning can relight them.

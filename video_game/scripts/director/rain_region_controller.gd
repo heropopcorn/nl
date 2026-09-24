@@ -86,9 +86,9 @@ func _spawn(model: DirectorSceneModel, region: Dictionary, intensity: float) -> 
 	var surface := Polygon2D.new()
 	surface.name = str(region.get("id", "rain"))
 	surface.polygon = polygon
-	# Contacts are now drawn by the full-screen rain material from the same
-	# endpoint map that clips each streak. Keep this node/material as the region
-	# data carrier and inspection target, but avoid a second unsynchronised splash.
+	# RainDropOverlay renders drops and contacts through world-space depth
+	# batches at each impact point, using this region's layer. This hidden node
+	# remains an inspection carrier, avoiding duplicate unsynchronised splashes.
 	surface.visible = false
 	var texture_uv := PackedVector2Array()
 	for point in polygon:

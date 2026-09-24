@@ -27,13 +27,8 @@ var _stream_seed := PackedFloat64Array()
 var _stream_event_base := PackedFloat64Array()
 var _stream_region := PackedInt32Array()
 var _stream_splashes := PackedByteArray()
-var _drops_thin := PackedVector2Array()
-var _drops_mid := PackedVector2Array()
-var _drops_thick := PackedVector2Array()
-var _splash_points := PackedVector2Array()
-var _splash_colors := PackedColorArray()
-var _dot_points := PackedVector2Array()
-var _dot_radii := PackedFloat32Array()
+var _depth_batches: Dictionary = {}
+const DepthBatch = preload("res://scripts/director/rain_depth_batch.gd")
 
 const SPLASH_DURATION := 0.62
 const MAX_STREAMS_PER_REGION := 1280
@@ -50,10 +45,14 @@ const SPLASH_SEGMENTS := 8
 func setup(host: VillageSandbox) -> void:
 	village = host
 	name = "PairedRainDrops"
-	set_process(false)
+	y_sort_enabled = true
+	set_process(true)
 
 
 func apply(model: DirectorSceneModel) -> void:
+	for batch in _depth_batches.values():
+		batch.free()
+	_depth_batches.clear()
 	_targets.clear()
 	_regions.clear()
 	_stream_seed.clear()
@@ -180,7 +179,7 @@ func _build_targets(model: DirectorSceneModel) -> void:
 		if pool.is_empty():
 			continue
 		var region_index := _regions.size()
-		_regions.append({"pool": pool})
+		_regions.append({"pool": pool, "layer": int(region.get("layer", 30))})
 		var polygon_area := absf(_signed_area(polygon))
 		# Low densities stay close to the previous look; the top of the slider
 		# is at least ten times the previous maximum (128 streams per region).
@@ -203,7 +202,9 @@ func _build_targets(model: DirectorSceneModel) -> void:
 			_stream_splashes.append(1 if splashes else 0)
 
 
-func _draw() -> void:
+func _process(_delta: float) -> void:
+	for batch in _depth_batches.values():
+		batch.clear_marks()
 	if not _enabled or village == null or village.world == null or _targets.is_empty():
 		return
 	var viewport_size := get_viewport_rect().size
@@ -229,15 +230,6 @@ func _draw() -> void:
 	var cull_min := Vector2(-180.0, -80.0)
 	var cull_max := viewport_size + Vector2(180.0, 120.0)
 	var splash_alpha := lerpf(0.58, 0.94, _intensity)
-	# Drops and splashes are batched into a few draw calls; issuing one call
-	# per drop does not scale to the densest settings.
-	_drops_thin.clear()
-	_drops_mid.clear()
-	_drops_thick.clear()
-	_splash_points.clear()
-	_splash_colors.clear()
-	_dot_points.clear()
-	_dot_radii.clear()
 	var max_life := _longest_travel(viewport_size, dir_y, base_speed) / (1.0 - SPEED_JITTER) + SPLASH_DURATION
 	# The hashes below are inlined copies of _emit_time, _pool_index and
 	# _drop_speed; function calls dominate the frame cost at high densities.
@@ -258,7 +250,8 @@ func _draw() -> void:
 				continue
 			h = sin((event_base + fk * 101.73) * 12.9898) * 43758.5453
 			h -= floor(h)
-			var target := screen[mini(int(h * float(pool_size)), pool_size - 1)]
+			var target_index := mini(int(h * float(pool_size)), pool_size - 1)
+			var target := screen[target_index]
 			if target.x < cull_min.x or target.x > cull_max.x or target.y < cull_min.y or target.y > cull_max.y:
 				continue
 			var distance_to_top := (target.y + 54.0) / dir_y
@@ -273,64 +266,24 @@ func _draw() -> void:
 			var size_random := sin((seed * 71.3 + fk * 23.17) * 12.9898) * 43758.5453
 			size_random -= floor(size_random)
 			var scale := lerpf(0.62, 1.42, size_random) * intensity_scale
+			var region_index := _stream_region[s]
+			var batch_key := region_index * POOL_SIZE + target_index
+			var batch: Node2D = _depth_batches.get(batch_key)
+			if batch == null:
+				batch = DepthBatch.new()
+				batch.position = village.uv_to_world(_regions[region_index]["pool"][target_index])
+				batch.z_index = int(_regions[region_index]["layer"])
+				add_child(batch)
+				_depth_batches[batch_key] = batch
 			if age < travel_time:
 				var travelled := age * speed
 				var head := target - fall_direction * (distance_to_top - travelled)
 				var tail_length := minf(tail_base * scale, travelled)
 				var tail := head - fall_direction * tail_length
-				if size_random < 1.0 / 3.0:
-					_drops_thin.append(tail)
-					_drops_thin.append(head)
-				elif size_random < 2.0 / 3.0:
-					_drops_mid.append(tail)
-					_drops_mid.append(head)
-				else:
-					_drops_thick.append(tail)
-					_drops_thick.append(head)
+				batch.add_streak(tail, head, Color(DROP_COLOR, lerpf(0.44, 0.78, _intensity)), clampf(0.85 * scale, 0.52, 1.55))
 			else:
 				var splash_age := clampf((age - travel_time) / SPLASH_DURATION, 0.0, 1.0)
-				_append_splash(target, splash_age, scale, splash_alpha)
-	var drop_color := Color(DROP_COLOR, lerpf(0.44, 0.78, _intensity))
-	var drop_sets := [_drops_thin, _drops_mid, _drops_thick]
-	for bucket in drop_sets.size():
-		var points: PackedVector2Array = drop_sets[bucket]
-		if points.is_empty():
-			continue
-		var bucket_scale := lerpf(0.62, 1.42, (float(bucket) + 0.5) / 3.0) * intensity_scale
-		draw_multiline(points, drop_color, clampf(0.85 * bucket_scale, 0.52, 1.55), true)
-	if not _splash_points.is_empty():
-		draw_multiline_colors(_splash_points, _splash_colors, clampf(0.95 * intensity_scale, 0.62, 1.65), true)
-	var dot_color := Color(SPLASH_COLOR, splash_alpha)
-	for i in _dot_points.size():
-		draw_circle(_dot_points[i], _dot_radii[i], dot_color)
-
-
-func _append_splash(center: Vector2, age: float, scale: float, splash_alpha: float) -> void:
-	var fade := 1.0 - smoothstep(0.62, 1.0, age)
-	if fade <= 0.001:
-		return
-	var color := Color(SPLASH_COLOR, fade * splash_alpha)
-	if age < 0.20:
-		_dot_points.append(center)
-		_dot_radii.append(lerpf(2.6, 1.2, age / 0.20) * scale)
-	var radius := lerpf(2.0, 17.0, age) * scale
-	var previous := center + Vector2(radius, 0.0)
-	for i in range(1, SPLASH_SEGMENTS + 1):
-		var angle := TAU * float(i) / float(SPLASH_SEGMENTS)
-		var point := center + Vector2(cos(angle) * radius, sin(angle) * radius * 0.28)
-		_splash_points.append(previous)
-		_splash_points.append(point)
-		_splash_colors.append(color)
-		previous = point
-	var crown_height := sin(age * PI) * 16.0 * scale
-	var spread := lerpf(3.0, 13.0, age) * scale
-	_splash_points.append(center + Vector2(-2.0, 0.0))
-	_splash_points.append(center + Vector2(-spread, -crown_height))
-	_splash_points.append(center + Vector2(2.0, 0.0))
-	_splash_points.append(center + Vector2(spread, -crown_height * 0.88))
-	_splash_colors.append(color)
-	_splash_colors.append(color)
-
+				batch.add_splash(target, splash_age, scale, splash_alpha)
 
 func _base_fall_speed() -> float:
 	return lerpf(520.0, 1120.0, _intensity) * clampf(1.0 + _wind_direction.y * _wind_strength * 0.18, 0.78, 1.20)
