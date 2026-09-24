@@ -2,21 +2,25 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "buildCommand": "bash tools/export-web.sh",
-  "installCommand": "true",
+  "installCommand": "npm ci",
   "outputDirectory": "export/web",
   "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "private, no-store" }]
+    },
     {
       "source": "/(.*).wasm",
       "headers": [
         { "key": "Content-Type", "value": "application/wasm" },
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        { "key": "Cache-Control", "value": "private, no-store" }
       ]
     },
     {
       "source": "/(.*).pck",
       "headers": [
         { "key": "Content-Type", "value": "application/octet-stream" },
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        { "key": "Cache-Control", "value": "private, no-store" }
       ]
     }
   ]
