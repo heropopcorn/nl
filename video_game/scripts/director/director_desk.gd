@@ -268,6 +268,16 @@ func render_gizmos(canvas: Node2D) -> void:
 	if village.camera:
 		zoom = maxf(village.camera.zoom.x, 0.2)
 	var handle := HANDLE / zoom
+	if not _preview_locked_edits() and selected_kind in ["element", "background_region"]:
+		var item := _element_by_id(selected_element_id) if selected_kind == "element" else _background_region_by_id(selected_region_id)
+		if not item.is_empty() and item.get("sort_offset_y") != null and bool(item.get("enabled", true)):
+			var bounds := _sort_line_bounds(item, selected_kind == "element")
+			var anchor_y := content.element_world_position(selected_element_id).y if selected_kind == "element" else bounds.get_center().y
+			var line_y := anchor_y + float(item["sort_offset_y"])
+			var a := Vector2(bounds.position.x - 12.0 / zoom, line_y)
+			var b := Vector2(bounds.end.x + 12.0 / zoom, line_y)
+			canvas.draw_line(a, b, Color(1.0, 0.25, 0.8), 3.0 / zoom)
+			canvas.draw_circle((a + b) * 0.5, 4.0 / zoom, Color.WHITE)
 	if selected_kind == "background" and village.terrain.texture:
 		var terrain_size := village.terrain_size()
 		canvas.draw_rect(Rect2(-terrain_size * 0.5, terrain_size), Color(1.0, 0.82, 0.35, 0.9), false, 3.0 / zoom)
@@ -2405,6 +2415,7 @@ func _fill_scene_tab() -> void:
 			_begin_cmd(); element["layer"] = int(value); _end_cmd(); _sync_world()
 		)
 		inner.add_child(element_layer)
+		_add_sort_line_controls(inner, element, true)
 		inner.add_child(_label("缩放倍率（也可用左侧缩放工具）", 12, false))
 		var element_scale := HSlider.new()
 		element_scale.min_value = 0.05
@@ -2459,6 +2470,7 @@ func _fill_scene_tab() -> void:
 			_begin_cmd(); bg_region["layer"] = int(value); _end_cmd(); _sync_world()
 		)
 		inner.add_child(region_layer)
+		_add_sort_line_controls(inner, bg_region, false)
 		inner.add_child(_btn("删除底图区域", _delete_selected_region))
 	inner.add_child(_checkbox("显示内置道具", bool(model.editor.get("show_baked_props", true)), func(v: bool) -> void:
 		if _loading: return
@@ -2672,6 +2684,52 @@ func _fill_actor_tab() -> void:
 		_refresh_inspector()
 		_refresh_hierarchy()
 	))
+
+
+func _sort_line_bounds(item: Dictionary, is_element: bool) -> Rect2:
+	var points := content.element_world_corners(str(item.get("id", ""))) if is_element else PackedVector2Array()
+	if not is_element:
+		for uv in DirectorSceneModel.points_from_value(item.get("points_uv", [])):
+			points.append(village.uv_to_world(uv))
+	if points.is_empty():
+		return Rect2()
+	var bounds := Rect2(points[0], Vector2.ZERO)
+	for point in points:
+		bounds = bounds.expand(point)
+	return bounds
+
+
+func _add_sort_line_controls(inner: VBoxContainer, item: Dictionary, is_element: bool) -> void:
+	var enabled := item.get("sort_offset_y") != null
+	inner.add_child(_checkbox("自定义遮挡基准线", enabled, func(value: bool) -> void:
+		if _loading or _preview_locked_edits(): return
+		_begin_cmd()
+		var offset := 0.0
+		if is_element:
+			offset = _sort_line_bounds(item, true).get_center().y - content.element_world_position(str(item["id"])).y
+		item["sort_offset_y"] = offset if value else null
+		_end_cmd()
+		content.rebuild(model)
+		_refresh_inspector.call_deferred()
+	))
+	if not enabled:
+		return
+	inner.add_child(_label("同层时，角色脚底在线上方被遮挡，下方则在前。粉色线仅选中时显示。", 12, false, true))
+	inner.add_child(_label("基准线偏移（像素，正数向下）", 12, false))
+	var offset := SpinBox.new()
+	offset.min_value = -8192
+	offset.max_value = 8192
+	offset.step = 1
+	offset.value = float(item["sort_offset_y"])
+	offset.editable = not _preview_locked_edits()
+	inner.add_child(offset)
+	offset.value_changed.connect(func(value: float) -> void:
+		if _loading or _preview_locked_edits(): return
+		_begin_cmd()
+		item["sort_offset_y"] = value
+		_end_cmd()
+		content.rebuild(model)
+	)
 
 
 func _season_family() -> String:
