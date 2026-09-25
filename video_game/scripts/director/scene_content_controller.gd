@@ -97,7 +97,7 @@ func hit_element(world_pos: Vector2) -> String:
 	for id in _element_nodes:
 		var sprite: Sprite2D = _element_nodes[id]
 		if sprite.visible and sprite.get_rect().has_point(sprite.to_local(world_pos)):
-			hits.append({"id": str(id), "z": sprite.z_index, "y": sprite.global_position.y})
+			hits.append({"id": str(id), "z": sprite.z_index, "y": sprite.get_parent().global_position.y if sprite.get_parent() != self else sprite.global_position.y})
 	hits.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		if int(a["z"]) != int(b["z"]): return int(a["z"]) > int(b["z"])
 		return float(a["y"]) > float(b["y"])
@@ -108,11 +108,14 @@ func hit_element(world_pos: Vector2) -> String:
 func hit_background_region(world_pos: Vector2) -> String:
 	var best := ""
 	var best_layer := -2147483648
+	var best_y := -INF
 	for id in _region_nodes:
 		var node: Polygon2D = _region_nodes[id]
-		if node.visible and Geometry2D.is_point_in_polygon(world_pos, node.polygon) and node.z_index >= best_layer:
+		var sort_y: float = node.get_parent().global_position.y if node.get_parent() != self else node.global_position.y
+		if node.visible and Geometry2D.is_point_in_polygon(node.to_local(world_pos), node.polygon) and (node.z_index > best_layer or node.z_index == best_layer and sort_y >= best_y):
 			best = str(id)
 			best_layer = node.z_index
+			best_y = sort_y
 	return best
 
 
@@ -175,6 +178,7 @@ func _spawn_element(element: Dictionary) -> void:
 	sprite.flip_h = bool(element.get("flip_h", false))
 	sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	add_child(sprite)
+	_apply_sort_line(sprite, element, sprite.position.y)
 	_element_nodes[str(element.get("id", ""))] = sprite
 
 
@@ -198,7 +202,24 @@ func _spawn_background_region(region: Dictionary) -> void:
 	node.z_index = int(region.get("layer", 0))
 	node.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	add_child(node)
+	var bounds := Rect2(polygon[0], Vector2.ZERO)
+	for point in polygon:
+		bounds = bounds.expand(point)
+	_apply_sort_line(node, region, bounds.get_center().y)
 	_region_nodes[str(region.get("id", ""))] = node
+
+
+func _apply_sort_line(visual: Node2D, data: Dictionary, anchor_y: float) -> void:
+	if data.get("sort_offset_y") == null:
+		return
+	# An unsorted parent supplies the Y-sort anchor, while the compensated child
+	# keeps its original world geometry, pivot, UVs and hit-testing coordinates.
+	var pivot := Node2D.new()
+	pivot.position.y = anchor_y + float(data["sort_offset_y"])
+	pivot.z_index = visual.z_index
+	add_child(pivot)
+	visual.reparent(pivot, true)
+	visual.z_as_relative = false
 
 
 func _clear() -> void:

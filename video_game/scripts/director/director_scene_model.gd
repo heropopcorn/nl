@@ -81,8 +81,8 @@ const KNOWN_ACTOR_KEYS := [
 	"id", "character_id", "display_name", "enabled", "start_uv", "layer", "route",
 ]
 const KNOWN_ROUTE_KEYS := ["points_uv", "speed_px_per_sec", "loop", "collision_mode", "visible"]
-const KNOWN_ELEMENT_KEYS := ["id", "asset_id", "display_name", "enabled", "position_uv", "layer", "scale", "rotation_degrees", "flip_h"]
-const KNOWN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "layer"]
+const KNOWN_ELEMENT_KEYS := ["id", "asset_id", "display_name", "enabled", "position_uv", "layer", "scale", "rotation_degrees", "flip_h", "sort_offset_y"]
+const KNOWN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "layer", "sort_offset_y"]
 const KNOWN_RAIN_REGION_KEYS := ["id", "name", "enabled", "points_uv", "splashes_enabled", "layer"]
 const KNOWN_WEATHER_KEYS := [
 	"enabled", "type", "intensity", "rain_density", "time_of_day", "night_ambient", "moonlight_enabled", "moonlight_intensity",
@@ -838,8 +838,16 @@ func _parse_actor(data: Dictionary) -> Dictionary:
 	return out
 
 
+static func _sort_offset(data: Dictionary) -> Variant:
+	var value: Variant = data.get("sort_offset_y")
+	if value == null or not (value is float or value is int) or not is_finite(float(value)):
+		return null
+	return clampf(float(value), -8192.0, 8192.0)
+
+
 func _parse_element(data: Dictionary) -> Dictionary:
 	var out := _take_extras(data, KNOWN_ELEMENT_KEYS)
+	out["sort_offset_y"] = _sort_offset(data)
 	out["id"] = str(data.get("id", ""))
 	out["asset_id"] = str(data.get("asset_id", "tree_oak"))
 	out["display_name"] = str(data.get("display_name", "元素"))
@@ -854,6 +862,7 @@ func _parse_element(data: Dictionary) -> Dictionary:
 
 func _parse_background_region(data: Dictionary) -> Dictionary:
 	var out := _take_extras(data, KNOWN_REGION_KEYS)
+	out["sort_offset_y"] = _sort_offset(data)
 	out["id"] = str(data.get("id", ""))
 	out["name"] = str(data.get("name", "底图区域"))
 	out["enabled"] = bool(data.get("enabled", true))
@@ -967,6 +976,7 @@ func _export_actor(actor: Dictionary) -> Dictionary:
 
 func _export_element(element: Dictionary) -> Dictionary:
 	return _export_with_extras(element, KNOWN_ELEMENT_KEYS, {
+		"sort_offset_y": _sort_offset(element),
 		"id": str(element.get("id", "")), "asset_id": str(element.get("asset_id", "tree_oak")),
 		"display_name": str(element.get("display_name", "元素")), "enabled": bool(element.get("enabled", true)),
 		"position_uv": element.get("position_uv", [0.5, 0.5]), "layer": _as_int(element.get("layer", 0), 0),
@@ -978,6 +988,7 @@ func _export_element(element: Dictionary) -> Dictionary:
 
 func _export_background_region(region: Dictionary) -> Dictionary:
 	return _export_with_extras(region, KNOWN_REGION_KEYS, {
+		"sort_offset_y": _sort_offset(region),
 		"id": str(region.get("id", "")), "name": str(region.get("name", "底图区域")),
 		"enabled": bool(region.get("enabled", true)), "points_uv": region.get("points_uv", []),
 		"layer": _as_int(region.get("layer", 0), 0),
