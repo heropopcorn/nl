@@ -138,6 +138,8 @@ var _new_rain_splashes := true
 var _save_timer: Timer
 var _picker: Node
 var _top: PanelContainer
+var _resolution_select: OptionButton
+var _resolution_tag := "default"
 var _left: PanelContainer
 var _right: PanelContainer
 var _bottom: PanelContainer
@@ -281,6 +283,10 @@ func render_gizmos(canvas: Node2D) -> void:
 	if selected_kind == "background" and village.terrain.texture:
 		var terrain_size := village.terrain_size()
 		canvas.draw_rect(Rect2(-terrain_size * 0.5, terrain_size), Color(1.0, 0.82, 0.35, 0.9), false, 3.0 / zoom)
+		var origin := Vector2(-terrain_size.x * 0.5, terrain_size.y * 0.5)
+		canvas.draw_line(origin, origin + Vector2(48, 0) / zoom, Color.RED, 2.0 / zoom)
+		canvas.draw_line(origin, origin + Vector2(0, -48) / zoom, Color.GREEN, 2.0 / zoom)
+		canvas.draw_string(theme.default_font, origin + Vector2(5, -8) / zoom, "(0,0)", HORIZONTAL_ALIGNMENT_LEFT, -1, maxi(10, int(16 / zoom)), Color.WHITE)
 	if _drag == DragKind.BOX:
 		var rect := _normalized_world_rect(_box_a, _box_b)
 		canvas.draw_rect(rect, Color(0.45, 0.85, 1.0, 0.18), true)
@@ -833,6 +839,7 @@ func run_runtime_selftest() -> PackedStringArray:
 		model.weather["moonlight_enabled"] = true
 		_apply_weather_effects()
 	# undo 50
+	errors.append_array(_selftest_resolution_switch())
 	var before := model.to_dict()
 	var canonical_before := DirectorSceneModel.from_dict(before).to_dict()
 	for i in 12:
@@ -984,6 +991,12 @@ func _fill_top() -> void:
 	row.add_child(_drawer_scene_btn)
 	row.add_child(_drawer_prop_btn)
 	row.add_child(_btn("帮助", _show_help))
+	_resolution_select = OptionButton.new()
+	_resolution_select.add_item("分辨率：默认")
+	_resolution_select.add_item("分辨率：x2")
+	_resolution_select.add_item("分辨率：x4")
+	_resolution_select.item_selected.connect(_switch_resolution)
+	row.add_child(_resolution_select)
 	if OS.has_feature("web"):
 		row.add_child(_btn("账号", func() -> void: JavaScriptBridge.eval("window.location.assign('/login')")))
 
@@ -2062,7 +2075,125 @@ func _sync_world(reset_editor_view: bool = false) -> void:
 	_refresh_mode_buttons()
 
 
+func _selftest_resolution_switch() -> PackedStringArray:
+	var errors: PackedStringArray = []
+	var saved_background := model.background.duplicate(true)
+	var sizes := [Vector2i(120, 80), Vector2i(120, 80), Vector2i(2400, 160)]
+	var tags := ["default", "x2", "x4"]
+	var path := repo.resolve_scene_file(model.scene_id, "resolution_test.png")
+	for i in range(3):
+		var image := Image.create(sizes[i].x, sizes[i].y, false, Image.FORMAT_RGBA8)
+		image.fill(Color(0.2, 0.4, 0.6))
+		image.save_png(_resolution_path(path, tags[i]))
+	model.background = {"source": "uploaded", "file": "resolution_test.png", "pixel_size": [120, 80]}
+	_resolution_tag = "default"
+	_sync_world()
+	var snapshot := JSON.stringify(model.to_dict())
+	var camera_offset := village.camera.offset
+	var camera_zoom := village.camera.zoom
+	var player_position := village.player.position
+	var saved_state := preview.state
+	preview.state = PreviewController.State.PAUSED
+	for i in range(3):
+		_switch_resolution(i)
+		if village.terrain.texture.get_size() != Vector2(sizes[i]) or village.terrain_size() != Vector2(120, 80):
+			errors.append("resolution must use real dimensions without changing logical canvas or capping to 2048")
+		var point := village.uv_to_world(Vector2(0.25, 0.75))
+		var pixel := village.world_to_background_pixel(point)
+		if not pixel.is_equal_approx(Vector2(sizes[i]) * 0.25) or not village.background_pixel_to_world(pixel).is_equal_approx(point):
+			errors.append("bottom-left pixel coordinate roundtrip failed")
+		if village.world_to_background_pixel(village.uv_to_world(Vector2(0, 1))) != Vector2.ZERO:
+			errors.append("bottom-left origin is not zero")
+		if JSON.stringify(model.to_dict()) != snapshot or village.player.position != player_position or preview.state != PreviewController.State.PAUSED:
+			errors.append("resolution switch changed document or preview state")
+		if village.camera.offset != camera_offset or village.camera.zoom != camera_zoom:
+			errors.append("resolution switch reset camera")
+		for node in content._region_nodes.values():
+			var polygon := node as Polygon2D
+			if polygon.texture != village.terrain.texture:
+				errors.append("cutout did not adopt high-resolution texture")
+	preview.state = saved_state
+	model.background = saved_background
+	_resolution_tag = "default"
+	_sync_world()
+	_refresh_resolution_options()
+	if not _resolution_select.is_item_disabled(1) or not _resolution_select.is_item_disabled(2):
+		errors.append("missing resolution variants should be disabled")
+	return errors
+
+
+func _background_base_path() -> String:
+	if model == null:
+		return ""
+	if str(model.background.get("source", "preset")) == "preset":
+		var preset := _builtin_background_by_preset(str(model.background.get("preset_id", "")))
+		return str(preset.get("path", VillageSandbox.GROUND_PATH))
+	return repo.resolve_scene_file(model.scene_id, str(model.background.get("file", "background.png")))
+
+
+func _resolution_path(base: String, tag: String) -> String:
+	return base if tag == "default" else base.get_basename() + "_" + tag + ".png"
+
+
+func _background_texture(path: String) -> Texture2D:
+	if path.is_empty():
+		return null
+	if ResourceLoader.exists(path):
+		return load(path) as Texture2D
+	if FileAccess.file_exists(path):
+		var image := Image.new()
+		if image.load_png_from_buffer(FileAccess.get_file_as_bytes(path)) == OK:
+			return ImageTexture.create_from_image(image)
+	return null
+
+
+func _refresh_resolution_options() -> void:
+	if _resolution_select == null:
+		return
+	var base := _background_base_path()
+	var tags := ["default", "x2", "x4"]
+	for index in range(tags.size()):
+		var path := _resolution_path(base, tags[index])
+		_resolution_select.set_item_disabled(index, base.is_empty() or not (ResourceLoader.exists(path) or FileAccess.file_exists(path)))
+	_resolution_select.select(tags.find(_resolution_tag))
+	if village.terrain.texture:
+		var size := village.terrain.texture.get_size()
+		_resolution_select.tooltip_text = "当前图片：%d × %d 像素\n图片坐标原点：左下角 (0,0)，X 向右、Y 向上。\nx2/x4 为资源标签，按实际图片尺寸映射。\n配套文件：原文件名_x2.png / 原文件名_x4.png" % [int(size.x), int(size.y)]
+
+
+func _switch_resolution(index: int) -> void:
+	if model == null:
+		return
+	_resolution_tag = str(["default", "x2", "x4"][index])
+	# Do not rebuild actors or restart playback: only replace background pixels
+	# and texture-backed cutouts, all in the same logical coordinate space.
+	_apply_background()
+	content.rebuild(model)
+	_set_status("背景分辨率：" + _resolution_tag + "（%d × %d）" % [village.terrain.texture.get_width(), village.terrain.texture.get_height()])
+
+
 func _apply_background() -> void:
+	_apply_background_resolution()
+	_refresh_resolution_options()
+
+
+func _apply_background_resolution() -> void:
+	var base_path := _background_base_path()
+	var original := _background_texture(base_path)
+	if original:
+		var chosen := original
+		if _resolution_tag != "default":
+			var variant := _background_texture(_resolution_path(base_path, _resolution_tag))
+			if variant:
+				chosen = variant
+			else:
+				_resolution_tag = "default"
+		var hide_props := not bool(model.editor.get("show_baked_props", true))
+		if not _builtin_background_by_preset(str(model.background.get("preset_id", ""))).is_empty():
+			hide_props = true
+		village.apply_director_texture(chosen, original.get_size(), hide_props)
+		return
+	_resolution_tag = "default"
 	var source := str(model.background.get("source", "preset"))
 	var show_props := bool(model.editor.get("show_baked_props", source == "preset"))
 	if source == "preset":
@@ -2126,6 +2257,7 @@ func _set_empty_scene() -> void:
 
 
 func _refresh_all() -> void:
+	_refresh_resolution_options()
 	_refresh_scene_list()
 	_refresh_hierarchy()
 	_refresh_inspector()
@@ -2391,6 +2523,7 @@ func _fill_scene_tab() -> void:
 		inner.add_child(_label("没有打开的场景。", 13, false))
 		return
 	if selected_kind == "background":
+		inner.add_child(_label("图片坐标：左下角 (0,0)，X 向右、Y 向上。分辨率切换不改变场景构图。", 12, false, true))
 		inner.add_child(_label("当前背景下的裁片区域：%d 块" % model.background_regions.size(), 12, false))
 		for item in model.background_regions:
 			var region_id := str(item.get("id", ""))
