@@ -95,7 +95,19 @@ func _unhandled_input(event: InputEvent) -> void:
 func terrain_size() -> Vector2:
 	if terrain.texture == null:
 		return Vector2.ZERO
-	return terrain.texture.get_size()
+	return terrain.texture.get_size() * terrain.scale
+
+
+## Public image-pixel coordinates: bottom-left origin, X right, Y up.
+## The existing top-left UV document format remains unchanged for compatibility.
+func world_to_background_pixel(world_pos: Vector2) -> Vector2:
+	var uv := world_to_uv(world_pos)
+	return Vector2(uv.x, 1.0 - uv.y) * terrain.texture.get_size()
+
+
+func background_pixel_to_world(pixel: Vector2) -> Vector2:
+	var uv := pixel / terrain.texture.get_size()
+	return uv_to_world(Vector2(uv.x, 1.0 - uv.y))
 
 
 func world_to_uv(world_pos: Vector2) -> Vector2:
@@ -137,6 +149,7 @@ func apply_ground_image(image: Image, persist: bool, hide_props: bool) -> String
 		note = "Resized to %dx%d (max edge %d)." % [next_w, next_h, MAX_GROUND_EDGE]
 	var player_uv := world_to_uv(player.position)
 	var old_size := terrain_size()
+	terrain.scale = Vector2.ONE
 	terrain.texture = ImageTexture.create_from_image(image)
 	terrain.centered = true
 	using_custom_ground = true
@@ -155,6 +168,7 @@ func apply_ground_image(image: Image, persist: bool, hide_props: bool) -> String
 func reset_ground() -> void:
 	var player_uv := world_to_uv(player.position)
 	var old_size := terrain_size()
+	terrain.scale = Vector2.ONE
 	var tex := load(GROUND_PATH) as Texture2D
 	terrain.texture = tex
 	terrain.centered = true
@@ -262,12 +276,26 @@ func water_collision_count() -> int:
 
 
 func apply_director_image(image: Image, hide_props: bool) -> void:
-	apply_ground_image(image, false, hide_props)
+	apply_director_texture(ImageTexture.create_from_image(image), image.get_size(), hide_props)
+
+
+func apply_director_texture(texture: Texture2D, canvas_size: Vector2, hide_props: bool) -> void:
+	var player_uv := world_to_uv(player.position)
+	var old_size := terrain_size()
+	terrain.texture = texture
+	terrain.scale = canvas_size / texture.get_size()
+	terrain.centered = true
+	using_custom_ground = true
+	set_hide_baked_props(hide_props)
+	if not old_size.is_equal_approx(canvas_size):
+		_on_ground_size_changed(old_size)
+		player.position = uv_to_world(player_uv)
 
 
 func load_approved_ground(hide_props: bool) -> void:
 	var player_uv := world_to_uv(player.position)
 	var old_size := terrain_size()
+	terrain.scale = Vector2.ONE
 	var tex := load(GROUND_PATH) as Texture2D
 	terrain.texture = tex
 	terrain.centered = true

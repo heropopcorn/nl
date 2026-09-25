@@ -190,7 +190,8 @@ func _spawn_background_region(region: Dictionary) -> void:
 		return
 	var polygon := PackedVector2Array()
 	var texture_uv := PackedVector2Array()
-	var size := village.terrain_size()
+	# Polygon geometry uses logical scene coordinates; texture UVs use actual pixels.
+	var size := village.terrain.texture.get_size()
 	for uv in uv_points:
 		polygon.append(village.uv_to_world(uv))
 		texture_uv.append(Vector2(uv.x * size.x, uv.y * size.y))
