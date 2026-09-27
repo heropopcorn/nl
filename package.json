@@ -1,0 +1,31 @@
+{
+  "name": "yuanli-director",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare:assets": "node apps/director-web/scripts/prepare-assets.mjs",
+    "dev": "npm run prepare:assets && vite --config apps/director-web/vite.config.ts",
+    "build": "npm run prepare:assets && tsc --noEmit && vite build --config apps/director-web/vite.config.ts",
+    "start": "node apps/director-web/server.mjs",
+    "pretest": "npm run prepare:assets",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "pixi.js": "^8.21.0",
+    "playcanvas": "^2.22.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.6.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^6.4.3",
+    "vitest": "^4.1.11"
+  }
+}
