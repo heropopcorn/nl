@@ -3,12 +3,12 @@ import { polygonBounds, validPolygon } from './geometry';
 import { mediaSchema, audioTrackSchema, object3dSchema } from './media';
 const point = z.object({ x: z.number().finite(), y: z.number().finite() });
 export const actorSchema = z.object({ id: z.string(), name: z.string().min(1), start: point, end: point, layer: z.number().int().min(-100).max(100).default(0), assetId: z.string().default('player'), enabled: z.boolean().default(true), width: z.number().min(1).max(8192).default(58 * 1024 / 720), height: z.number().min(1).max(8192).default(84 * 1024 / 720), scale: z.number().min(0.01).max(20).default(1), rotation: z.number().finite().default(0), flipX: z.boolean().default(false), flipY: z.boolean().default(false), sortY: z.number().nullable().default(null), route: z.array(point).max(256).default([]), speed: z.number().min(0).max(1200).default(210), loop: z.boolean().default(false), routeVisible: z.boolean().default(true), collision: z.enum(['ignore', 'stop']).default('ignore') });
-export const rectSchema = z.object({ x: z.number().min(0).max(1536), y: z.number().min(0).max(1024), width: z.number().min(1).max(1536), height: z.number().min(1).max(1024), points: z.array(z.object({ x: z.number().min(0).max(1536), y: z.number().min(0).max(1024) })).min(3).max(128).optional() }).refine(r => r.x + r.width <= 1536 && r.y + r.height <= 1024, '范围不能超出背景').refine(r => !r.points || (validPolygon(r.points) && Object.entries(polygonBounds(r.points)).every(([key, value]) => Math.abs(r[key as 'x' | 'y' | 'width' | 'height'] - value) < 0.001)), '多边形不可自交、退化或与包围盒不一致');
+export const rectSchema = z.object({ x: z.number().min(0).max(1536), y: z.number().min(0).max(1024), width: z.number().min(1).max(1536), height: z.number().min(1).max(1024), points: z.array(z.object({ x: z.number().min(0).max(1536), y: z.number().min(0).max(1024) })).min(3).max(128).optional(), splashes: z.boolean().optional() }).refine(r => r.x + r.width <= 1536 && r.y + r.height <= 1024, '范围不能超出背景').refine(r => !r.points || (validPolygon(r.points) && Object.entries(polygonBounds(r.points)).every(([key, value]) => Math.abs(r[key as 'x' | 'y' | 'width' | 'height'] - value) < 0.001)), '多边形不可自交、退化或与包围盒不一致');
 export const seasons = ['original', 'spring_early', 'spring_mid', 'spring_late', 'summer_early', 'summer_mid', 'summer_late', 'autumn_early', 'autumn_mid', 'autumn_late', 'winter_early', 'winter_mid', 'winter_late'] as const;
 export const effectSchema = z.object({
   id: z.string(), name: z.string().min(1), type: z.enum(['rain', 'snow', 'fog', 'water', 'cutout']),
   enabled: z.boolean().default(true), layer: z.number().int().min(-100).max(100).default(0),
-  intensity: z.number().min(0).max(1).default(0.6), speed: z.number().min(0).max(4).default(1),
+  intensity: z.number().min(0).max(1).default(0.6), density: z.number().min(0).max(1).default(0.6), speed: z.number().min(0).max(4).default(1),
   wind: z.number().min(-1).max(1).default(0.2), seed: z.number().int().min(0).max(1000000).default(42),
   splashes: z.boolean().default(true), sortY: z.number().min(0).max(1024).nullable().default(null),
   regions: z.array(rectSchema).min(1).max(12),
@@ -26,8 +26,13 @@ export const shotSchema = z.object({
   lighting: lightingSchema.prefault({}),
   sceneId: z.string().default('scene-1'), setRef: z.string().nullable().default(null),
   backgroundAssetId: z.string().nullable().default(null), backgroundVersions: z.object({ x2: z.string().optional(), x4: z.string().optional() }).default({}),
+  blank: z.boolean().default(false),
   collisionEnabled: z.boolean().default(true), snap: z.number().min(0).max(128).default(0),
-  wind: z.object({ enabled: z.boolean().default(false), strength: z.number().min(-1).max(1).default(0.4), speed: z.number().min(0).max(4).default(1) }).prefault({}),
+  wind: z.object({
+    enabled: z.boolean().default(false), strength: z.number().min(-1).max(1).default(0.45), speed: z.number().min(0).max(4).default(1),
+    direction: z.object({ x: z.number().min(-1).max(1).default(1), y: z.number().min(-1).max(1).default(0) }).default({ x: 1, y: 0 }),
+    gust: z.number().min(0).max(1).default(0.5),
+  }).prefault({}),
   lightning: z.object({ enabled: z.boolean().default(false), intensity: z.number().min(0).max(1).default(0.7), interval: z.number().min(1).max(60).default(8) }).prefault({}),
   objects3d: z.array(object3dSchema).max(100).default([]),
   camera3d: z.object({ x: z.number().default(5), y: z.number().default(5), z: z.number().default(8), targetY: z.number().default(0), fov: z.number().min(10).max(120).default(45) }).prefault({}),

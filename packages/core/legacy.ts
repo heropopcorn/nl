@@ -32,10 +32,11 @@ export function migrateLegacyScene(raw: any, backgroundAssetId: string | null = 
   }
   for (const region of raw.background_regions ?? []) { const r = polygon(region); shot.effects.push(effectSchema.parse({ id: String(region.id), name: region.name || '背景裁片', type: 'cutout', enabled: region.enabled, layer: region.layer, regions: [r], sortY: typeof region.sort_offset_y === 'number' ? r.y + r.height / 2 - region.sort_offset_y * 1024 / (raw.background?.pixel_size?.[1] || 1024) : null })); }
   const weather = raw.weather ?? {};
-  for (const region of raw.rain_regions ?? []) shot.effects.push(effectSchema.parse({ id: String(region.id), name: region.name || '降雨', type: 'rain', enabled: (region.enabled ?? true) && !!weather.enabled, intensity: weather.intensity, splashes: region.splashes_enabled, layer: region.layer, regions: [polygon(region)] }));
-  if (weather.enabled && !(raw.rain_regions?.length)) shot.effects.push(effectSchema.parse({ id: crypto.randomUUID(), name: '全场降雨', type: 'rain', intensity: weather.intensity, regions: [{ x: 0, y: 0, width: 1536, height: 1024 }] }));
+  for (const region of raw.rain_regions ?? []) shot.effects.push(effectSchema.parse({ id: String(region.id), name: region.name || '降雨', type: 'rain', enabled: (region.enabled ?? true) && !!weather.enabled, intensity: weather.intensity, density: weather.rain_density ?? 0.6, splashes: region.splashes_enabled, layer: region.layer, regions: [polygon(region)] }));
+  if (weather.enabled && !(raw.rain_regions?.length)) shot.effects.push(effectSchema.parse({ id: crypto.randomUUID(), name: '全场降雨', type: 'rain', intensity: weather.intensity, density: weather.rain_density ?? 0.6, regions: [{ x: 0, y: 0, width: 1536, height: 1024 }] }));
   shot.lighting = { time: weather.time_of_day ?? 'noon', ambient: weather.night_ambient ?? 0.35, moon: weather.moonlight_enabled === false ? 0 : weather.moonlight_intensity ?? 0.65 };
-  shot.wind = { enabled: !!weather.wind_enabled, strength: (weather.wind_direction?.[0] ?? 1) * (weather.wind_strength ?? 0.4), speed: weather.wind_speed ?? 1 };
+  const windDirection = Array.isArray(weather.wind_direction) ? weather.wind_direction : [1, 0];
+  shot.wind = { enabled: !!weather.wind_enabled, strength: weather.wind_strength ?? 0.45, speed: 1, direction: { x: Number(windDirection[0] ?? 1), y: Number(windDirection[1] ?? 0) }, gust: weather.wind_speed ?? 0.5 };
   shot.lightning = { enabled: !!weather.lightning_enabled, intensity: weather.lightning_intensity ?? 0.7, interval: 14 - (weather.lightning_frequency ?? 0.35) * 11 };
   if (raw.camera || raw.legacy_water || raw.editor?.show_baked_props) warnings.push('旧版烘焙道具/相机/位图水域请复核，原始 JSON 保持不变');
   return { shot: shotSchema.parse(shot), warnings };

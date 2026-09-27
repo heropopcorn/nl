@@ -20,12 +20,20 @@ describe('routes, collision, legacy import', () => {
     expect(shot.actors[0].start.x).toBeCloseTo(0.42 * 1536);
     expect(shot.actors[0].start.y).toBeCloseTo(0.58 * 1024);
     expect(shot.effects.filter(e => e.type === 'rain')).toHaveLength(2);
+    expect(shot.effects.find(e => e.type === 'rain')!.density).toBeCloseTo(0.6);
     expect(shot.effects[0].collisionEnabled).toBe(true);
+    expect(shot.wind.enabled).toBe(true);
+    expect(shot.wind.direction.x).toBeCloseTo(-1);
+    expect(shot.wind.strength).toBeCloseTo(0.55);
+    expect(shot.wind.gust).toBeCloseTo(0.5);
     expect(shot.lightning.enabled).toBe(true);
     expect(shot.effects.some(e => e.type === 'cutout')).toBe(true);
   });
   it('loads older projects with new default media and scene organization', () => {
     const old = JSON.parse(JSON.stringify(sample)); delete old.assets; delete old.scenes; delete old.chapters; old.shots.forEach((s: any) => delete s.sceneId);
     const p = projectSchema.parse(old); expect(p.assets).toEqual([]); expect(p.scenes[0].chapterId).toBe(p.chapters[0].id);
+    expect(p.shots[0].blank).toBe(false);
+    expect(p.shots[0].wind).toMatchObject({ direction: { x: 1, y: 0 }, gust: 0.5 });
+    expect(p.shots[0].effects).toEqual([]);
   });
 });

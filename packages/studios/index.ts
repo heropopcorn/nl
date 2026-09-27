@@ -1,4 +1,4 @@
-import { Application, Assets, Sprite } from 'pixi.js';
+import { Application, Assets, Graphics, Sprite } from 'pixi.js';
 import { locate, type Project, type Shot } from '../core';
 import { compositeEnvironment } from './environment';
 import { manifestSchema, resolveBackground, type BackgroundManifest, type Quality } from '../core/backgrounds';
@@ -13,10 +13,16 @@ class PixiStudio implements Studio {
   constructor(private app: Application, private textures: Record<string, Awaited<ReturnType<typeof Assets.load>>>) {}
   render(shot: Shot, frame: number, backgroundUrl = `/art/${shot.background}.png`) {
     this.app.stage.removeChildren().forEach(child => child.destroy());
-    if (!this.textures[backgroundUrl]) throw new Error('背景尚未加载');
-    const bg = new Sprite(this.textures[backgroundUrl]);
-    bg.width = 1080; bg.height = 720; bg.x = 100;
-    this.app.stage.addChild(bg);
+    if (shot.blank) {
+      const panel = new Graphics();
+      panel.rect(100, 0, 1080, 720).fill(0x8a8172);
+      this.app.stage.addChild(panel);
+    } else {
+      if (!this.textures[backgroundUrl]) throw new Error('背景尚未加载');
+      const bg = new Sprite(this.textures[backgroundUrl]);
+      bg.width = 1080; bg.height = 720; bg.x = 100;
+      this.app.stage.addChild(bg);
+    }
     this.app.render();
     return this.app.canvas as HTMLCanvasElement;
   }
@@ -73,7 +79,8 @@ export class DirectorRenderer {
   isPrepared(project: Project, frame: number, quality: Quality = 'default') {
     const { shot } = locate(project, frame);
     if (shot.studio === 'three') return !!this.three && this.three.isPrepared(shot, project.assets);
-    return shot.studio !== 'pixi' || (!!this.textures[resolveBackground(this.manifest, shot, quality, project.assets).url] && shot.actors.filter(a => a.enabled).every(a => { const asset = [...builtinAssets, ...project.assets].find(m => m.id === a.assetId); return !!asset && !!this.images[asset.src]; }));
+    const actorsReady = shot.actors.filter(a => a.enabled).every(a => { const asset = [...builtinAssets, ...project.assets].find(m => m.id === a.assetId); return !!asset && !!this.images[asset.src]; });
+    return shot.studio !== 'pixi' || ((shot.blank || !!this.textures[resolveBackground(this.manifest, shot, quality, project.assets).url]) && actorsReady);
   }
   async prepare(project: Project, frame: number, quality: Quality = 'default') {
     const { shot } = locate(project, frame);
@@ -84,6 +91,7 @@ export class DirectorRenderer {
       if (!media) throw new Error(`缺失资源：${actor.name}`);
       if (!this.images[media.src]) { const img = new Image(); img.src = media.src; await img.decode(); this.images[media.src] = img; }
     }
+    if (shot.blank) return;
     const asset = resolveBackground(this.manifest, shot, quality, project.assets);
     if (this.textures[asset.url]) return;
     if (!this.pending.has(asset.url)) this.pending.set(asset.url, Assets.load(asset.url).then(texture => { this.textures[asset.url] = texture; }).finally(() => this.pending.delete(asset.url)));
@@ -91,7 +99,7 @@ export class DirectorRenderer {
   }
   render(project: Project, frame: number, output: HTMLCanvasElement, quality: Quality = 'default') {
     const { shot, local } = locate(project, frame);
-    const source = (shot.studio === 'pixi' ? this.pixi : shot.studio === 'three' ? this.three! : this.motion).render(shot, local, shot.studio === 'pixi' ? resolveBackground(this.manifest, shot, quality, project.assets).url : undefined);
+    const source = (shot.studio === 'pixi' ? this.pixi : shot.studio === 'three' ? this.three! : this.motion).render(shot, local, shot.studio === 'pixi' && !shot.blank ? resolveBackground(this.manifest, shot, quality, project.assets).url : undefined);
     const ctx = output.getContext('2d')!;
     ctx.drawImage(source, 0, 0);
     if (shot.studio === 'pixi') { const media = [...builtinAssets, ...project.assets]; compositeEnvironment(ctx, shot, local, this.images.player, source, Object.fromEntries(media.map(a => [a.id, this.images[a.src]])), media); }
