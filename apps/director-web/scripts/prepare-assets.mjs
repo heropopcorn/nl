@@ -2,6 +2,11 @@ import { mkdir, copyFile, readFile, writeFile, readdir } from 'node:fs/promises'
 const root = new URL('../../../', import.meta.url);
 const output = new URL('../public/art/', import.meta.url);
 await mkdir(output, { recursive: true });
+for (const file of await readdir(new URL('assets/nl-ui/', root))) {
+  if (!file.endsWith('.png')) continue;
+  const id = 'nl_' + file.replace(/^\d+-/, '').replace('.png', '').replaceAll('-', '_');
+  await copyFile(new URL(`assets/nl-ui/${file}`, root), new URL(`${id}.png`, output));
+}
 const manifest = {};
 const seasons = ['', ...['spring', 'summer', 'autumn', 'winter'].flatMap(s => ['early', 'mid', 'late'].map(p => `${s}_${p}`))];
 for (const family of ['protagonist_village', 'village_school']) for (const season of seasons) {

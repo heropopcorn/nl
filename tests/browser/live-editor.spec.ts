@@ -38,6 +38,8 @@ test('no timeline or play controls; rain animates immediately without moving act
   const before = await project(page), dry = await pixels(page);
   await page.getByLabel('视图', { exact: true }).selectOption('1.5');
   const p = await point(page,600,400); await page.mouse.move(p.x,p.y); await page.mouse.down({button:'middle'}); await page.mouse.move(p.x+20,p.y+20); await page.mouse.up({button:'middle'});
+  // Wait for React to commit the pan before taking the reference viewport state.
+  await expect(page.locator('.canvas-stack')).toHaveAttribute('style', 'transform: translate(20px, 20px) scale(1.5);');
   const view = await page.locator('.canvas-stack').getAttribute('style');
   await page.getByLabel('添加环境元素').selectOption('rain');
   await expect.poll(() => pixels(page)).not.toBe(dry);

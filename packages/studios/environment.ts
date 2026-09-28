@@ -1,3 +1,4 @@
+import { spriteFrame } from '../core/sprite-frame';
 import { type Shot, type Effect } from '../core';
 import { containsPoint, regionPoints } from '../core/geometry';
 import { actorPosition } from '../core/routes';
@@ -27,17 +28,17 @@ export function compositeEnvironment(ctx: CanvasRenderingContext2D, shot: Shot, 
   for (const actor of shot.actors) {
     if (!actor.enabled) continue;
     const p = actorPosition(actor, shot, actorFrame), image = sprites[actor.assetId] ?? player, asset = assets.find(a => a.id === actor.assetId);
-    const columns = asset?.columns ?? 1, rows = asset?.rows ?? 1, cell = Math.floor(frame / 30 * (asset?.fps ?? 12)) % (columns * rows);
+    const rect = spriteFrame(asset, image.naturalWidth, image.naturalHeight, frame);
     items.push({ layer: actor.layer, y: actor.sortY === null ? p.y : actor.sortY + p.y - actor.start.y, draw: () => {
       ctx.save(); ctx.translate(sx(p.x), sy(p.y)); ctx.rotate(-actor.rotation * Math.PI / 180); ctx.scale(actor.scale * (actor.flipX ? -1 : 1), actor.scale * (actor.flipY ? -1 : 1));
       const dw = actor.width * k, dh = actor.height * k;
       if (actor.assetId === 'farmer_blue') {
         const tinted = document.createElement('canvas'); tinted.width = Math.max(1, Math.ceil(dw)); tinted.height = Math.max(1, Math.ceil(dh));
         const g = tinted.getContext('2d')!;
-        g.drawImage(image, cell % columns * image.naturalWidth / columns, Math.floor(cell / columns) * image.naturalHeight / rows, image.naturalWidth / columns, image.naturalHeight / rows, 0, 0, tinted.width, tinted.height);
+        g.drawImage(image, rect.x, rect.y, rect.width, rect.height, 0, 0, tinted.width, tinted.height);
         g.globalCompositeOperation = 'source-atop'; g.fillStyle = '#2f6fbe'; g.globalAlpha = 0.55; g.fillRect(0, 0, tinted.width, tinted.height);
         ctx.drawImage(tinted, -dw / 2, -dh, dw, dh);
-      } else ctx.drawImage(image, cell % columns * image.naturalWidth / columns, Math.floor(cell / columns) * image.naturalHeight / rows, image.naturalWidth / columns, image.naturalHeight / rows, -dw / 2, -dh, dw, dh);
+      } else ctx.drawImage(image, rect.x, rect.y, rect.width, rect.height, -dw / 2, -dh, dw, dh);
       ctx.restore();
     } });
   }
