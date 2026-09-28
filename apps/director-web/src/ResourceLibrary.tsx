@@ -8,7 +8,7 @@ export function ResourceLibrary({ project, shot, edit, select, notify }: { proje
     if (asset.category === 'models') { if (shot.studio !== 'three') { notify('模型请放入 3D 镜头'); return; } edit(p => p.shots.find(s => s.id === shot.id)!.objects3d.push(object3dSchema.parse({ id: crypto.randomUUID(), name: asset.name, shape: 'model', assetId: asset.id }))); return; }
     if (asset.category === 'audio') { edit(p => { p.audioTracks.push({ id: crypto.randomUUID(), name: asset.name, assetId: asset.id, startFrame: 0, offsetFrame: 0, frames: 180, volume: 1, muted: false }); }); return; }
     if (shot.studio !== 'pixi') { notify('图片资源请放入 2D 镜头'); return; }
-    if (asset.category === 'backgrounds') { if (!confirm('当前已有背景，是否替换？元素坐标将保留。')) return; edit(p => { const s = p.shots.find(s => s.id === shot.id)!; s.backgroundAssetId = asset.id; s.backgroundVersions = {}; }); return; }
+    if (asset.category === 'backgrounds') { if (!confirm('当前已有背景，是否替换？元素坐标将保留。')) return; edit(p => { const s = p.shots.find(s => s.id === shot.id)!; s.backgroundAssetId = asset.id; s.backgroundVersions = {}; s.blank = false; }); return; }
     const image = new Image(); image.src = asset.src; await image.decode();
     const id = crypto.randomUUID(), height = asset.category === 'characters' ? 119 : 250, width = height * (image.naturalWidth / asset.columns) / (image.naturalHeight / asset.rows);
     edit(p => { p.shots.find(s => s.id === shot.id)!.actors.push(actorSchema.parse({ id, name: asset.name, assetId: asset.id, width, height, start: { x: 768, y: 450 }, end: { x: 768, y: 450 } })); }); select(id);
