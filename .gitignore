@@ -4,6 +4,12 @@
 video_game/build/
 
 # Local / secrets
+node_modules/
+apps/director-web/dist/
+apps/director-web/public/art/
+apps/director-web/public/assets.json
+test-results/
+playwright-report/
 .env
 .env
 .env.local

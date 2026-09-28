@@ -1,0 +1,38 @@
+import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { unzipSync, strFromU8 } from 'fflate';
+test('two studios, persisted edits, deterministic seek and PNG output', async ({ page }) => {
+  const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
+  await page.goto('/'); await expect(page.getByRole('status')).toContainText('影棚已就绪');
+  const preview = page.getByLabel('影棚预览');
+  const first = await preview.evaluate((c: HTMLCanvasElement) => c.toDataURL());
+  await page.getByRole('button', { name: '03 五行 · 相生' }).click();
+  const motion = await preview.evaluate((c: HTMLCanvasElement) => c.toDataURL()); expect(motion).not.toBe(first);
+  await page.getByRole('button', { name: '01 村庄 · 出发' }).click();
+  await expect.poll(() => preview.evaluate((c: HTMLCanvasElement) => c.toDataURL())).toBe(first);
+  await page.getByRole('button', { name: '主角（占位贴图）' }).click();
+  await page.getByLabel('元素名称').fill('小明');
+  await page.reload(); await expect(page.getByRole('status')).toContainText('影棚已就绪');
+  await expect(page.getByRole('button', { name: '♙ 小明' })).toBeVisible();
+  const pending = page.waitForEvent('download'); await page.getByRole('button', { name: '保存当前帧 PNG' }).click();
+  expect((await pending).suggestedFilename()).toMatch(/\.png$/);
+  await page.screenshot({ path: 'test-results/director.png', fullPage: true });
+  expect(errors).toEqual([]);
+});
+test('sequence crosses studios without changing preview state', async ({ page }) => {
+  await page.goto('/'); await expect(page.getByRole('status')).toContainText('影棚已就绪');
+  await page.getByLabel('时间轴').fill('350');
+  const preview = page.getByLabel('影棚预览');
+  const before = await preview.evaluate((c: HTMLCanvasElement) => c.toDataURL());
+  const pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: '输出从当前帧起 1 秒序列' }).click();
+  const download = await pending;
+  const files = unzipSync(await readFile((await download.path())!));
+  expect(Object.keys(files).filter(k => k.endsWith('.png'))).toHaveLength(30);
+  const manifest = JSON.parse(strFromU8(files['manifest.json']));
+  expect(manifest).toMatchObject({ startFrame: 350, endFrameExclusive: 380, fps: 30 });
+  expect(Buffer.from(files['frame-000350.png']).toString('base64')).toBe(before.split(',')[1]);
+  expect(files['frame-000360.png']).not.toEqual(files['frame-000350.png']);
+  expect(await preview.evaluate((c: HTMLCanvasElement) => c.toDataURL())).toBe(before);
+  await expect(page.getByLabel('时间轴')).toHaveValue('350');
+});
