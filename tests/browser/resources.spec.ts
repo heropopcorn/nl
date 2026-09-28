@@ -4,7 +4,7 @@ import { nlAssets } from '../../packages/core/nl-assets';
 test('large resource browser previews and applies all imported NL-UI images', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('footer')).toContainText('影棚已就绪');
-  expect(nlAssets).toHaveLength(20);
+  expect(nlAssets).toHaveLength(40);
   for (const asset of nlAssets) expect((await page.request.get(asset.src)).ok()).toBe(true);
   await expect(page.locator('.resource-items .asset')).toHaveCount(6);
   const before = await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].backgroundAssetId);
@@ -13,7 +13,12 @@ test('large resource browser previews and applies all imported NL-UI images', as
   await expect(dialog).toBeVisible();
   const box = (await dialog.boundingBox())!;
   expect(box.width * box.height / (1440 * 960)).toBeGreaterThan(0.8);
-  await expect(dialog.locator('.asset')).toHaveCount(9);
+  await expect(dialog.locator('.asset')).toHaveCount(17);
+  await dialog.getByLabel('搜索资源').fill('沙漠');
+  await expect(dialog.locator('.asset')).toHaveCount(4);
+  await dialog.getByLabel('搜索资源').fill('山地');
+  await expect(dialog.locator('.asset')).toHaveCount(4);
+  await dialog.getByLabel('搜索资源').fill('');
   await dialog.getByRole('button', { name: '东南小村 · 村庄主区地皮', exact: true }).click();
   await expect(dialog.getByRole('img', { name: '东南小村 · 村庄主区地皮' })).toBeVisible();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].backgroundAssetId)).toBe(before);
