@@ -4,14 +4,19 @@ import { compositeEnvironment } from './environment';
 import { manifestSchema, resolveBackground, type BackgroundManifest, type Quality } from '../core/backgrounds';
 import { builtinAssets } from '../core/media';
 import type { ThreeStudio } from './three';
+import { WaterSurface } from './water';
+export type LivePreview = { environmentFrame: number; effectFrames: Record<string, number>; lightningFrame: number };
 
 export interface Studio {
   render(shot: Shot, frame: number, backgroundUrl?: string): HTMLCanvasElement;
   dispose(): void;
 }
 class PixiStudio implements Studio {
+  private backgroundKey = '';
   constructor(private app: Application, private textures: Record<string, Awaited<ReturnType<typeof Assets.load>>>) {}
   render(shot: Shot, frame: number, backgroundUrl = `/art/${shot.background}.png`) {
+    const key = shot.blank ? `blank:${shot.blankColor}` : backgroundUrl;
+    if (key === this.backgroundKey) return this.app.canvas as HTMLCanvasElement;
     this.app.stage.removeChildren().forEach(child => child.destroy());
     if (shot.blank) {
       const panel = new Graphics();
@@ -24,6 +29,7 @@ class PixiStudio implements Studio {
       this.app.stage.addChild(bg);
     }
     this.app.render();
+    this.backgroundKey = key;
     return this.app.canvas as HTMLCanvasElement;
   }
   dispose() { this.app.destroy(true, { children: true, texture: false }); }
@@ -54,6 +60,7 @@ class MotionStudio implements Studio {
   dispose() { this.canvas.remove(); }
 }
 export class DirectorRenderer {
+  private water?: WaterSurface;
   private three?: ThreeStudio;
   private pending = new Map<string, Promise<void>>();
   private constructor(private pixi: Studio, private motion: Studio, private images: Record<string, HTMLImageElement>, public readonly manifest: BackgroundManifest, private textures: Record<string, Awaited<ReturnType<typeof Assets.load>>>) {}
@@ -97,17 +104,21 @@ export class DirectorRenderer {
     if (!this.pending.has(asset.url)) this.pending.set(asset.url, Assets.load(asset.url).then(texture => { this.textures[asset.url] = texture; }).finally(() => this.pending.delete(asset.url)));
     await this.pending.get(asset.url);
   }
-  render(project: Project, frame: number, output: HTMLCanvasElement, quality: Quality = 'default') {
+  render(project: Project, frame: number, output: HTMLCanvasElement, quality: Quality = 'default', live?: LivePreview) {
     const { shot, local } = locate(project, frame);
     const source = (shot.studio === 'pixi' ? this.pixi : shot.studio === 'three' ? this.three! : this.motion).render(shot, local, shot.studio === 'pixi' && !shot.blank ? resolveBackground(this.manifest, shot, quality, project.assets).url : undefined);
     const ctx = output.getContext('2d')!;
     ctx.drawImage(source, 0, 0);
-    if (shot.studio === 'pixi') { const media = [...builtinAssets, ...project.assets]; compositeEnvironment(ctx, shot, local, this.images.player, source, Object.fromEntries(media.map(a => [a.id, this.images[a.src]])), media); }
+    if (shot.studio === 'pixi') {
+      if (shot.effects.some(e => e.type === 'water' && e.enabled && e.intensity > 0 && e.regions.length)) this.water ??= new WaterSurface();
+      const media = [...builtinAssets, ...project.assets];
+      compositeEnvironment(ctx, shot, live?.environmentFrame ?? local, this.images.player, source, Object.fromEntries(media.map(a => [a.id, this.images[a.src]])), media, this.water, local, live?.effectFrames, live?.lightningFrame);
+    }
     const caption = shot.subtitles.find(s => local >= s.start && local < s.end)?.text ?? shot.caption;
-    if (caption) {
+    if (caption && !live) {
       ctx.fillStyle = '#000000aa'; ctx.fillRect(0, 648, 1280, 72);
       ctx.fillStyle = 'white'; ctx.font = '24px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(caption, 640, 693, 1200);
     }
   }
-  dispose() { this.pixi.dispose(); this.motion.dispose(); this.three?.dispose(); }
+  dispose() { this.pixi.dispose(); this.motion.dispose(); this.three?.dispose(); this.water?.dispose(); }
 }

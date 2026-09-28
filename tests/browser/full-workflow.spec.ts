@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { writeFile } from 'node:fs/promises';
 import { sample, effectSchema, shotSchema } from '../../packages/core';
 const exec = promisify(execFile);
 async function coordinates(page: Page, x: number, y: number) { const b = (await page.getByLabel('影棚预览').boundingBox())!, s = Math.min(b.width / 1280, b.height / 720); return { x: b.x + (b.width - 1280*s)/2 + (100+x*720/1024)*s, y: b.y + (b.height - 720*s)/2 + (720-y*720/1024)*s }; }
@@ -42,9 +43,11 @@ test('three studios export a complete MP4 with AAC audio', async ({ page }) => {
   const wav=Buffer.alloc(44+48000*2); wav.write('RIFF',0);wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(48000,24);wav.writeUInt32LE(96000,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(wav.length-44,40);for(let i=0;i<48000;i++)wav.writeInt16LE(Math.round(Math.sin(i*2*Math.PI*440/48000)*2000),44+i*2);
   p.assets.push({id:'audio',name:'Tone',category:'audio',src:`data:audio/wav;base64,${wav.toString('base64')}`,width:1,height:1,columns:1,rows:1,fps:12});p.audioTracks.push({id:'track',name:'Tone',assetId:'audio',startFrame:0,offsetFrame:0,frames:6,volume:0.5,muted:false});
   await page.addInitScript(p=>localStorage.setItem('yuanli.web-director.v1',JSON.stringify(p)),p); await start(page);
-  await page.getByLabel('时间轴',{exact:true}).fill('4');await expect(page.getByLabel('影棚预览')).toHaveAttribute('aria-busy','false');
+  await page.locator('.scene-cards').getByRole('button',{name:/03 五行/}).click();await expect(page.getByLabel('影棚预览')).toHaveAttribute('aria-busy','false');
   await page.screenshot({path:'test-results/three-studio.png',fullPage:true});
-  const pending=page.waitForEvent('download');await page.getByRole('button',{name:'导出 MP4 视频（含音轨）'}).click();const file=await (await pending).path();
+  // Video UI is paused; validate the retained encoder directly.
+  const encoded = await page.evaluate(async ({url,p}) => { const { exportVideo } = await import(url); const blob = await exportVideo(p,'default',0,6,()=>{},new AbortController().signal); const data=new Uint8Array(await blob.arrayBuffer());let binary='';for(const byte of data)binary+=String.fromCharCode(byte);return btoa(binary); }, {url:'/src/videoExport.ts',p});
+  const file=test.info().outputPath('service-video.mp4');await writeFile(file,Buffer.from(encoded,'base64'));
   const result=JSON.parse((await exec('ffprobe',['-v','error','-show_streams','-show_format','-of','json',file!])).stdout);
   expect(result.streams.find((s:any)=>s.codec_type==='video')).toMatchObject({codec_name:'h264',width:1280,height:720,nb_frames:'6'});
   expect(result.streams.find((s:any)=>s.codec_type==='audio').codec_name).toBe('aac');
@@ -56,5 +59,5 @@ test('chapters, scenes and immutable scene-set snapshots',async({page})=>{
   await page.getByRole('button',{name:'保存布景版本'}).click();
   await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).sets.length)).toBe(1);
   const p=await page.evaluate(()=>JSON.parse(localStorage.getItem('yuanli.web-director.v1')!));expect(p.sets).toHaveLength(1);
-  await page.getByLabel('镜头名称',{exact:true}).fill('改名');const changed=await page.evaluate(()=>JSON.parse(localStorage.getItem('yuanli.web-director.v1')!));expect(changed.sets[0].content.name).not.toBe('改名');
+  await page.getByLabel('布景名称',{exact:true}).fill('改名');const changed=await page.evaluate(()=>JSON.parse(localStorage.getItem('yuanli.web-director.v1')!));expect(changed.sets[0].content.name).not.toBe('改名');
 });

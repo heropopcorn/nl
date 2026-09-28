@@ -23,7 +23,7 @@ test('mixed legacy import preserves dimensions, chapter order, blank color and c
   expect(prop.effects[0].flowVector).toEqual({ x: 0, y: -2 });
   expect(blank).toMatchObject({ blank: true, blankColor: '#336699' });
   expect(blank.actors[0]).toMatchObject({ assetId: 'farmer_blue', collision: 'stop' });
-  await page.getByLabel('时间轴', { exact: true }).fill('720');
+  await page.locator('.scene-cards').getByRole('button', { name: /空白旧场景/ }).click();
   await expect(page.getByLabel('影棚预览')).toHaveAttribute('aria-busy', 'false');
   await expect(page.getByLabel('画布底色')).toHaveValue('#336699');
   await page.screenshot({ path: 'test-results/legacy-blank-import.png', fullPage: true });
@@ -52,13 +52,15 @@ test('backup restore and corrupt-current recovery; F3 stays out of PNG output', 
   await page.getByRole('button', { name: '创建备份', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('已创建本机备份');
   await page.getByRole('button', { name: '关闭备份', exact: true }).click();
-  await page.getByLabel('镜头名称', { exact: true }).fill('备份后修改');
+  await page.getByLabel('布景名称', { exact: true }).fill('备份后修改');
   await expect.poll(async () => (await stored(page)).shots[0].name).toBe('备份后修改');
   await page.getByRole('button', { name: '本机备份', exact: true }).click();
   await page.getByRole('button', { name: /^恢复备份 / }).first().click();
-  await expect(page.getByLabel('镜头名称', { exact: true })).toHaveValue(original);
+  await expect(page.getByLabel('布景名称', { exact: true })).toHaveValue(original);
   await page.getByLabel('添加环境元素').selectOption('water');
   await page.getByLabel('区域启用碰撞', { exact: true }).check();
+  // Compare export pixels at a frozen surface, not two different live instants.
+  await page.getByLabel('speed', { exact: true }).fill('0');
   await page.getByRole('button', { name: '适应画布', exact: true }).click();
   const canvas = page.getByLabel('影棚预览');
   const pixels = await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL().split(',')[1]);
@@ -75,6 +77,6 @@ test('backup restore and corrupt-current recovery; F3 stays out of PNG output', 
     localStorage.removeItem('yuanli.web-director.v1');
   });
   await page.reload();
-  await expect(page.getByLabel('镜头名称', { exact: true })).toHaveValue(original);
+  await expect(page.getByLabel('布景名称', { exact: true })).toHaveValue(original);
   await expect(page.getByRole('button', { name: '◉ 水流 1', exact: true })).toBeVisible();
 });

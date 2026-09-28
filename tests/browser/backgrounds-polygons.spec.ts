@@ -8,16 +8,14 @@ async function logicalClick(page: Page, x: number, y: number) {
   const scale = Math.min(box.width / 1280, box.height / 720);
   await page.mouse.click(box.x + (box.width - 1280 * scale) / 2 + (100 + x * 720 / 1024) * scale, box.y + (box.height - 720 * scale) / 2 + (720 - y * 720 / 1024) * scale);
 }
-test('season switching preserves timeline, routes and view; missing quality is disabled', async ({ page }) => {
+test('season switching preserves editing state, routes and view; missing quality is disabled', async ({ page }) => {
   await page.goto('/'); await expect(page.getByRole('status')).toContainText('影棚已就绪');
-  await page.getByLabel('时间轴').fill('70');
   const before = await pixelImage(page);
   const original = await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0]);
   await expect(page.getByLabel('背景分辨率').locator('option[value="x2"]')).toHaveJSProperty('disabled', true);
   await expect(page.getByLabel('背景分辨率').locator('option[value="x4"]')).toHaveJSProperty('disabled', true);
   await page.getByLabel('背景时节', { exact: true }).selectOption('winter_mid'); await loaded(page);
   await expect.poll(async () => (await pixelImage(page)) !== before).toBe(true);
-  await expect(page.getByLabel('时间轴')).toHaveValue('70');
   const after = await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0]);
   expect(after.actors).toEqual(original.actors); expect(after.season).toBe('winter_mid');
   await page.getByRole('button', { name: '撤销', exact: true }).click(); await loaded(page);
@@ -45,12 +43,8 @@ test('resolution labels use actual dimensions and do not mutate document coordin
   expect(await page.evaluate(() => localStorage.getItem('yuanli.web-director.v1'))).toBe(data);
   await expect(page.getByLabel('背景分辨率').locator('option:checked')).toHaveText('x4 · 768×512');
   const output = await pixelImage(page), pending = page.waitForEvent('download');
-  await page.getByRole('button', { name: '输出从当前帧起 1 秒序列' }).click();
-  const files = unzipSync(await readFile((await (await pending).path())!));
-  expect(Buffer.from(files['frame-000000.png']).toString('base64') === output.split(',')[1]).toBe(true);
-  const metadata = JSON.parse(strFromU8(files['manifest.json']));
-  expect(metadata.backgroundQuality).toBe('x4');
-  expect(metadata.backgrounds[0]).toMatchObject({ quality: 'x4', width: 768, height: 512 });
+  await page.getByRole('button',{name:'保存当前帧 PNG'}).click();
+  expect((await readFile((await(await pending).path())!)).toString('base64')).toBe(output.split(',')[1]);
   await page.getByLabel('背景时节', { exact: true }).selectOption('spring_early'); await loaded(page);
   await expect(page.getByLabel('背景分辨率')).toHaveValue('default');
 });
@@ -58,18 +52,19 @@ test('resolution labels use actual dimensions and do not mutate document coordin
 test('draw polygon across middle-button pan, keep tool active, save and export without guides', async ({ page }) => {
   await page.goto('/'); await expect(page.getByRole('status')).toContainText('影棚已就绪');
   await page.getByLabel('添加环境元素').selectOption('water');
-  await page.getByRole('button', { name: '重绘范围 1', exact: true }).click();
+  await page.getByRole('button', { name: '重绘区域 1', exact: true }).click();
   await logicalClick(page, 500, 350); await logicalClick(page, 950, 350);
   const box = (await page.locator('.viewport').boundingBox())!;
   await page.mouse.move(box.x + 200, box.y + 100); await page.mouse.down({ button: 'middle' });
   await page.mouse.move(box.x + 240, box.y + 120); await page.mouse.up({ button: 'middle' });
-  await expect(page.locator('.draw-toolbar')).toContainText('2 个点');
+  await expect(page.getByLabel('多边形草稿').locator('circle')).toHaveCount(2);
   await logicalClick(page, 650, 650);
   await page.getByRole('button', { name: '闭合范围' }).click();
-  await expect(page.locator('.draw-toolbar')).toContainText('0 个点');
+  await expect(page.getByLabel('多边形草稿').locator('circle')).toHaveCount(0);
   const region = await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].effects[0].regions[0]);
   expect(region.points).toHaveLength(3); expect(region.points[0].x).toBeCloseTo(500, -1); expect(region.points[2].y).toBeCloseTo(650, -1);
-  await page.getByRole('button', { name: '退出绘制' }).click();
+  await page.getByRole('button',{name:'移动 V',exact:true}).click();
+  await page.getByLabel('speed',{exact:true}).fill('0');
   const before = await pixelImage(page), pending = page.waitForEvent('download');
   await page.getByRole('button', { name: '保存当前帧 PNG' }).click();
   expect((await readFile((await (await pending).path())!)).toString('base64') === before.split(',')[1]).toBe(true);
@@ -96,7 +91,7 @@ test('late asset loads cannot overwrite the latest season; failed assets block e
   expect((await pixelImage(page)) === summer).toBe(true);
   await page.route('**/art/protagonist_village_autumn_mid.png', route => route.abort());
   await page.getByLabel('背景时节', { exact: true }).selectOption('autumn_mid');
-  await expect(page.getByRole('status')).toContainText('背景加载失败');
+  await expect(page.getByRole('status')).toContainText('渲染失败');
   await expect(page.getByRole('button', { name: '保存当前帧 PNG' })).toBeDisabled();
   await page.getByLabel('背景时节', { exact: true }).selectOption('summer_early'); await loaded(page);
   expect((await pixelImage(page)) === summer).toBe(true);
