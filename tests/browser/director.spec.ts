@@ -19,20 +19,13 @@ test('two studios, persisted edits, deterministic seek and PNG output', async ({
   await page.screenshot({ path: 'test-results/director.png', fullPage: true });
   expect(errors).toEqual([]);
 });
-test('sequence crosses studios without changing preview state', async ({ page }) => {
-  await page.goto('/'); await expect(page.getByRole('status')).toContainText('影棚已就绪');
-  await page.getByLabel('时间轴').fill('350');
-  const preview = page.getByLabel('影棚预览');
-  const before = await preview.evaluate((c: HTMLCanvasElement) => c.toDataURL());
-  const pending = page.waitForEvent('download');
-  await page.getByRole('button', { name: '输出从当前帧起 1 秒序列' }).click();
-  const download = await pending;
-  const files = unzipSync(await readFile((await download.path())!));
-  expect(Object.keys(files).filter(k => k.endsWith('.png'))).toHaveLength(30);
-  const manifest = JSON.parse(strFromU8(files['manifest.json']));
-  expect(manifest).toMatchObject({ startFrame: 350, endFrameExclusive: 380, fps: 30 });
-  expect(Buffer.from(files['frame-000350.png']).toString('base64')).toBe(before.split(',')[1]);
-  expect(files['frame-000360.png']).not.toEqual(files['frame-000350.png']);
-  expect(await preview.evaluate((c: HTMLCanvasElement) => c.toDataURL())).toBe(before);
-  await expect(page.getByLabel('时间轴')).toHaveValue('350');
+test('offline renderer crosses studios without changing the live editor', async ({page})=>{
+ await page.goto('/');await expect(page.locator('footer')).toContainText('影棚已就绪');
+ const before=await page.getByLabel('影棚预览').evaluate((c:HTMLCanvasElement)=>c.toDataURL());
+ const result=await page.evaluate(async url=>{
+ const {DirectorRenderer}=await import(url+'/packages/studios/index.ts');const {sample}=await import(url+'/packages/core/index.ts');
+ const r=await DirectorRenderer.create(),c=Object.assign(document.createElement('canvas'),{width:1280,height:720});
+ try{await r.prepare(sample,350);r.render(sample,350,c);const a=c.toDataURL();await r.prepare(sample,360);r.render(sample,360,c);const b=c.toDataURL();r.render(sample,350,c);return{a,b,again:c.toDataURL()};}finally{r.dispose();}
+ },'/@fs/'+process.cwd());
+ expect(result.a).not.toBe(result.b);expect(result.again).toBe(result.a);expect(await page.getByLabel('影棚预览').evaluate((c:HTMLCanvasElement)=>c.toDataURL())).toBe(before);
 });

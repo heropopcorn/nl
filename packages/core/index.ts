@@ -6,12 +6,12 @@ export const actorSchema = z.object({ id: z.string(), name: z.string().min(1), s
 export const rectSchema = z.object({ x: z.number().min(0).max(1536), y: z.number().min(0).max(1024), width: z.number().min(1).max(1536), height: z.number().min(1).max(1024), points: z.array(z.object({ x: z.number().min(0).max(1536), y: z.number().min(0).max(1024) })).min(3).max(128).optional(), splashes: z.boolean().optional() }).refine(r => r.x + r.width <= 1536 && r.y + r.height <= 1024, '范围不能超出背景').refine(r => !r.points || (validPolygon(r.points) && Object.entries(polygonBounds(r.points)).every(([key, value]) => Math.abs(r[key as 'x' | 'y' | 'width' | 'height'] - value) < 0.001)), '多边形不可自交、退化或与包围盒不一致');
 export const seasons = ['original', 'spring_early', 'spring_mid', 'spring_late', 'summer_early', 'summer_mid', 'summer_late', 'autumn_early', 'autumn_mid', 'autumn_late', 'winter_early', 'winter_mid', 'winter_late'] as const;
 export const effectSchema = z.object({
-  id: z.string(), name: z.string().min(1), type: z.enum(['rain', 'snow', 'fog', 'water', 'cutout']),
+  id: z.string(), name: z.string().min(1), type: z.enum(['rain', 'snow', 'fog', 'water', 'cutout', 'lightning']),
   enabled: z.boolean().default(true), layer: z.number().int().min(-100).max(100).default(0),
   intensity: z.number().min(0).max(1).default(0.6), density: z.number().min(0).max(1).default(0.6), speed: z.number().min(0).max(4).default(1),
   wind: z.number().min(-1).max(1).default(0.2), seed: z.number().int().min(0).max(1000000).default(42),
   splashes: z.boolean().default(true), sortY: z.number().min(0).max(1024).nullable().default(null),
-  regions: z.array(rectSchema).min(1).max(12),
+  regions: z.array(rectSchema).max(12),
   collisionEnabled: z.boolean().default(false), flowLines: z.array(z.array(point).min(2).max(128)).max(16).default([]),
   flowVector: point.nullable().default(null),
 });

@@ -7,3 +7,4 @@
 .legacy-import-dialog label { display: grid; gap: 5px; margin: 12px 0; }
 .collision-overlay polygon { fill: #ff88002b; stroke: #ffae54; stroke-dasharray: 6 4; }
 .collision-overlay circle { fill: #53f7dd; stroke: #10232d; }
+.scene-browser{grid-column:1/4;border-top:1px solid #344152;display:flex;background:#19212d}.scene-cards{display:flex;gap:10px;flex-wrap:wrap}.scene-cards .clip{width:190px;flex:none}.live-badge{color:#7be1bb}.environment-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:3px;align-items:center;margin-bottom:6px}.environment-row .row{margin:0;font-size:11px}.environment-row>button:not(.row){padding:5px;font-size:10px}.danger{color:#ffaea1}.region-manager{margin:16px 0}.active-region{border-color:#ffc773}.selected-region{stroke:#ffc773;stroke-width:4;fill:#ffc77312}.region-manager>button{margin:4px 0;width:100%}.canvas-tools small{flex-basis:100%;color:#bfd8d4}.region-fields legend{color:#bfd8d4}

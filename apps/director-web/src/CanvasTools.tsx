@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState, type PointerEvent, type RefObject } from 'react';
 import { type Shot } from '../../../packages/core';
-import { clientToLogical, containsPoint, polygonBounds, regionPoints, simplifyPolyline, snapCoordinate, validPolygon, type Point } from '../../../packages/core/geometry';
+import { clientToLogical, containsPoint, polygonBounds, regionPoints, snapCoordinate, validPolygon, type Point } from '../../../packages/core/geometry';
 import { imageCorners, imageLocal } from '../../../packages/core/handles';
 import { actorPosition } from '../../../packages/core/routes';
 type Tool = 'move' | 'scale' | 'rotate' | 'vertices' | 'route' | 'flow' | 'lasso' | 'rect';
 const screen = (p: Point) => `${100 + p.x * 720 / 1024},${720 - p.y * 720 / 1024}`;
-export function useCanvasTools({ shot, local, selected, select, change, pause, notify, locked, playing }: { shot: Shot; local: number; selected: string; select: (id: string) => void; change: (fn: (s: Shot) => void) => void; pause: () => void; notify: (s: string) => void; locked: boolean; playing: boolean }) {
+export function useCanvasTools({ shot, local, selected, select, change, pause, notify, locked, playing, activeRegion, selectRegion }: { shot: Shot; local: number; selected: string; select: (id: string) => void; change: (fn: (s: Shot) => void) => void; pause: () => void; notify: (s: string) => void; locked: boolean; playing: boolean; activeRegion: number | null; selectRegion: (i: number | null) => void }) {
   const [tool, setTool] = useState<Tool>('move'), [preview, setPreview] = useState<Shot | null>(null), [stroke, setStroke] = useState<Point[]>([]), [walk, setWalk] = useState<Record<string, Point>>({});
   const held = useRef(new Set<string>()), walkRef = useRef(walk), noted = useRef(false);
   const shotRef = useRef(shot), selectedRef = useRef(selected), localRef = useRef(local);
   shotRef.current = shot; selectedRef.current = selected; localRef.current = local; walkRef.current = walk;
-  const drag = useRef<{ start: Point; source: Shot; id: string; vertex?: [number, number]; stroke?: boolean; corner?: number; rotate?: boolean } | null>(null);
+  const drag = useRef<{ start: Point; source: Shot; id: string; region?: number; vertex?: [number, number]; stroke?: boolean; corner?: number; rotate?: boolean } | null>(null);
+  const replaceRegion = useRef<number | undefined>(undefined);
+  const replaceShape = useRef<string | undefined>(undefined);
+  const [hover, setHover] = useState<Point | null>(null);
   const previewRef = useRef<Shot | null>(null), strokeRef = useRef<Point[]>([]);
   useEffect(() => { setPreview(null); drag.current = null; setStroke([]); strokeRef.current = []; walkRef.current = {}; setWalk({}); held.current.clear(); }, [shot.id]);
   useEffect(() => { if (playing) { walkRef.current = {}; setWalk({}); held.current.clear(); } }, [playing]);
@@ -43,17 +46,22 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [notify]);
-  useEffect(() => { if (drag.current?.id !== selected) { setPreview(null); previewRef.current = null; drag.current = null; } setStroke([]); strokeRef.current = []; }, [selected]);
+  useEffect(() => { if (drag.current?.id !== selected) { setPreview(null); previewRef.current = null; drag.current = null; } setStroke([]); strokeRef.current = []; replaceRegion.current = undefined; replaceShape.current = undefined; setHover(null); }, [selected, shot.id]);
   const actor = shot.actors.find(a => a.id === selected), effect = shot.effects.find(e => e.id === selected);
-  function choose(t: Tool) { pause(); setTool(t); setStroke([]); strokeRef.current = []; drag.current = null; setPreview(null); }
+  function choose(t: Tool) { pause(); setTool(t); setStroke([]); strokeRef.current = []; replaceRegion.current = undefined; drag.current = null; previewRef.current = null; setPreview(null); setHover(null); }
+  function startRegion(replace?: number) { choose('lasso'); replaceRegion.current = replace; replaceShape.current = replace === undefined ? undefined : JSON.stringify(effect?.regions[replace]); notify('多边形套索：单击放点，回到首点、双击或 Enter 闭合；Backspace 撤回，Esc 取消，中键平移不会结束绘制'); }
   function commitStroke() {
     if (tool === 'route' && actor && strokeRef.current.length) change(s => { s.actors.find(a => a.id === actor.id)!.route = [actor.start, ...strokeRef.current]; });
     else if (tool === 'flow' && effect && strokeRef.current.length >= 2) change(s => { s.effects.find(e => e.id === effect.id)!.flowLines.push(strokeRef.current); });
     else if (tool === 'lasso' && effect) {
-      const points = simplifyPolyline(strokeRef.current, 8).map(p => ({ x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 }));
-      if (points.length < 3 || !validPolygon(points)) { notify(points.length < 3 ? '自由套索至少需要三个点' : '自由套索自交或面积过小，请重画'); }
-      else if (effect.regions.length >= 12) notify('每个元素最多 12 个范围');
-      else change(s => { s.effects.find(e => e.id === effect.id)!.regions.push({ ...polygonBounds(points), points }); notify('已添加自由套索范围，工具保持选中'); });
+      const points = strokeRef.current.map(p => ({ x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 }));
+      if (points.length < 3 || !validPolygon(points)) { notify('无法闭合：至少三个点，不能自交或共线；可撤销顶点继续修改'); return; }
+      const target = replaceRegion.current;
+      if (target !== undefined && (!effect.regions[target] || JSON.stringify(effect.regions[target]) !== replaceShape.current)) { notify('重绘的区域已删除或改变，请重新选择区域后绘制'); return; }
+      if (target === undefined && effect.regions.length >= 12) { notify('每个元素最多 12 个区域'); return; }
+      change(s => { const f = s.effects.find(e => e.id === effect.id)!; const r = { ...f.regions[target ?? -1], ...polygonBounds(points), points }; if (target === undefined) f.regions.push(r); else f.regions[target] = r; });
+      selectRegion(target ?? effect.regions.length); replaceRegion.current = undefined;
+      notify('区域已保存；套索保持选中，可继续逐点绘制');
     } else if (tool === 'rect' && effect && strokeRef.current.length >= 3) {
       const bounds = polygonBounds(strokeRef.current);
       if (bounds.width < 8 || bounds.height < 8) notify('矩形太小');
@@ -69,8 +77,9 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
       if (locked || typing) return;
       if (e.key.toLowerCase() === 'v') choose('move');
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 't') { e.preventDefault(); choose('scale'); }
-      if (e.key === 'Escape') { drag.current = null; setPreview(null); setStroke([]); strokeRef.current = []; setTool('move'); }
+      if (e.key === 'Escape') { choose('move'); }
       if (e.key === 'Enter' && strokeRef.current.length) { e.preventDefault(); commitStroke(); }
+      if (e.key === 'Backspace' && strokeRef.current.length) { e.preventDefault(); strokeRef.current = strokeRef.current.slice(0, -1); setStroke(strokeRef.current); }
       if (actor && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); const step = e.shiftKey ? 10 : 1, dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0, dy = e.key === 'ArrowDown' ? -step : e.key === 'ArrowUp' ? step : 0; change(s => { const a = s.actors.find(a => a.id === actor.id)!; [a.start, a.end, ...a.route].forEach(p => { p.x += dx; p.y += dy; }); if (a.sortY !== null) a.sortY += dy; }); }
     }; const release = (e: KeyboardEvent) => held.current.delete(e.key.toLowerCase()); const blur = () => held.current.clear();
     window.addEventListener('keydown', key); window.addEventListener('keyup', release); window.addEventListener('blur', blur);
@@ -82,7 +91,15 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
     if (locked || shot.studio !== 'pixi' || e.button !== 0) return;
     const p = point(e, canvas); if (!p) return; pause();
     if (tool === 'route' || tool === 'flow') { if ((tool === 'route' && !actor) || (tool === 'flow' && effect?.type !== 'water')) { notify('路线需选中图片元素，水流导线需选中水域'); return; } strokeRef.current = [...strokeRef.current, p].slice(0, 128); setStroke(strokeRef.current); return; }
-    if (tool === 'lasso' || tool === 'rect') { if (!effect) { notify('请先选中环境元素'); return; } strokeRef.current = [p]; setStroke([p]); drag.current = { start: p, source: structuredClone(shot), id: selected, stroke: true }; e.currentTarget.setPointerCapture(e.pointerId); return; }
+    if (tool === 'lasso') {
+      if (!effect || effect.type === 'lightning') { notify('请先选中有区域的环境元素'); return; }
+      const points = strokeRef.current;
+      if (points.length >= 3 && Math.hypot(p.x - points[0].x, p.y - points[0].y) < 12) { commitStroke(); return; }
+      if (points.length >= 128) { notify('最多 128 个顶点，请先闭合'); return; }
+      if (!points.length || Math.hypot(p.x - points.at(-1)!.x, p.y - points.at(-1)!.y) > 1) { strokeRef.current = [...points, p]; setStroke(strokeRef.current); }
+      return;
+    }
+    if (tool === 'rect') { if (!effect || effect.type === 'lightning') { notify('请先选中环境元素'); return; } strokeRef.current = [p]; setStroke([p]); drag.current = { start: p, source: structuredClone(shot), id: selected, stroke: true }; e.currentTarget.setPointerCapture(e.pointerId); return; }
     const pickedActor = shot.actors.find(a => a.id === selected);
     if ((tool === 'scale' || tool === 'rotate') && pickedActor) {
       const origin = shifted(pickedActor);
@@ -110,11 +127,15 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
     if (!id) return;
     const entry = shot.effects.find(f => f.id === id); let vertex: [number, number] | undefined;
     if (tool === 'vertices') shot.actors.find(a => a.id === id)?.route.forEach((v, i) => { if (Math.hypot(p.x - v.x, p.y - v.y) < 20) vertex = [-1, i]; });
-    if (tool === 'vertices' && entry) entry.regions.forEach((r, ri) => regionPoints(r).forEach((v, vi) => { if (Math.hypot(p.x - v.x, p.y - v.y) < 20) vertex = [ri, vi]; }));
+    if (tool === 'vertices' && entry) entry.regions.forEach((r, ri) => { if (activeRegion !== null && ri !== activeRegion) return; regionPoints(r).forEach((v, vi) => { if (Math.hypot(p.x - v.x, p.y - v.y) < 20) vertex = [ri, vi]; }); });
     if (tool === 'vertices' && !vertex) return;
-    drag.current = { start: p, source: structuredClone(shot), id, vertex }; e.currentTarget.setPointerCapture(e.pointerId);
+    let region = activeRegion ?? undefined;
+    if (entry && tool === 'move') { const hit = entry.regions.findIndex(r => containsPoint(r, p)); if (hit >= 0) { region = hit; selectRegion(hit); } }
+    if (entry && (!entry.regions.length || entry.type === 'lightning')) return;
+    drag.current = { start: p, source: structuredClone(shot), id, vertex, region }; e.currentTarget.setPointerCapture(e.pointerId);
   }
   function move(e: PointerEvent, canvas: RefObject<HTMLCanvasElement | null>) {
+    if (tool === 'lasso' && strokeRef.current.length && !(e.buttons & 4)) setHover(point(e, canvas));
     if (!drag.current || (e.buttons & 4)) return; const p = point(e, canvas); if (!p) return;
     const d = drag.current;
     if (d.stroke) { if (tool === 'rect') { strokeRef.current = [d.start, { x: p.x, y: d.start.y }, p, { x: d.start.x, y: p.y }]; setStroke(strokeRef.current); return; } const last = strokeRef.current.at(-1)!; if (Math.hypot(p.x - last.x, p.y - last.y) > 12 && strokeRef.current.length < 128) { strokeRef.current = [...strokeRef.current, p]; setStroke(strokeRef.current); } return; }
@@ -135,13 +156,14 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
       }
       if (d.rotate) { a.rotation = sourceActor.rotation + (Math.atan2(p.y - visual.y, p.x - visual.x) - Math.atan2(d.start.y - visual.y, d.start.x - visual.x)) * 180 / Math.PI; if (e.shiftKey) a.rotation = Math.round(a.rotation / 15) * 15; }
     } else if (f) {
-      if (d.vertex) { const [ri, vi] = d.vertex, points = regionPoints(f.regions[ri]); points[vi] = { x: snap(p.x), y: snap(p.y) }; f.regions[ri] = { ...polygonBounds(points), points }; }
+      if (d.vertex) { const [ri, vi] = d.vertex, points = regionPoints(f.regions[ri]); points[vi] = { x: snap(p.x), y: snap(p.y) }; f.regions[ri] = { ...f.regions[ri], ...polygonBounds(points), points }; }
       else {
-        const bounds = polygonBounds(f.regions.flatMap(regionPoints)), center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+        const targets = d.region === undefined ? f.regions : f.regions.slice(d.region, d.region + 1);
+        const bounds = polygonBounds(targets.flatMap(regionPoints)), center = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
         const ratio = tool === 'scale' ? Math.hypot(p.x - center.x, p.y - center.y) / Math.max(1, Math.hypot(d.start.x - center.x, d.start.y - center.y)) : 1;
         let angle = tool === 'rotate' ? Math.atan2(p.y - center.y, p.x - center.x) - Math.atan2(d.start.y - center.y, d.start.x - center.x) : 0; if (e.shiftKey) angle = Math.round(angle / (Math.PI / 12)) * Math.PI / 12;
         const map = (v: Point) => tool === 'move' ? { x: v.x + dx, y: v.y + dy } : { x: center.x + ((v.x - center.x) * Math.cos(angle) - (v.y - center.y) * Math.sin(angle)) * ratio, y: center.y + ((v.x - center.x) * Math.sin(angle) + (v.y - center.y) * Math.cos(angle)) * ratio };
-        f.regions = f.regions.map(r => { const points = regionPoints(r).map(map); return { ...polygonBounds(points), points }; }); f.flowLines = f.flowLines.map(line => line.map(map)); if (f.sortY !== null && tool === 'move') f.sortY += dy;
+        f.regions = f.regions.map((r, i) => { if (d.region !== undefined && i !== d.region) return r; const points = regionPoints(r).map(map); return { ...r, ...polygonBounds(points), points }; }); if (d.region === undefined) { f.flowLines = f.flowLines.map(line => line.map(map)); if (f.sortY !== null && tool === 'move') f.sortY += dy; }
       }
     }
     previewRef.current = next; setPreview(next);
@@ -161,7 +183,7 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
   };
   const display = preview || Object.keys(walk).length ? applyWalk(preview ?? shot) : null;
   const shown = display ?? shot, current = shown.actors.find(a => a.id === selected), pos = current ? actorPosition(current, shown, local) : null;
-  const overlay = <svg className="selection-overlay tool-overlay" viewBox="0 0 1280 720">{current && pos && <g transform={`translate(${100 + pos.x * 720 / 1024} ${720 - pos.y * 720 / 1024}) rotate(${-current.rotation}) scale(${current.scale})`}><rect x={-current.width * 720 / 2048} y={-current.height * 720 / 1024} width={current.width * 720 / 1024} height={current.height * 720 / 1024}/>{[-1, 1].flatMap(x => [0, -current.height * 720 / 1024].map(y => <rect key={`${x},${y}`} x={x * current.width * 720 / 2048 - 4} y={y - 4} width="8" height="8"/>))}</g>}{tool === "vertices" && current?.route.map((p,i) => <circle key={i} cx={100+p.x*720/1024} cy={720-p.y*720/1024} r="5"/>)}{current?.routeVisible && <polyline points={current.route.map(screen).join(' ')}/>} {current?.sortY !== null && current?.sortY !== undefined && <line x1="100" x2="1180" y1={720 - current.sortY * 720 / 1024} y2={720 - current.sortY * 720 / 1024}/>}{tool === 'vertices' && effect?.regions.flatMap((r, ri) => regionPoints(r).map((v, vi) => <circle key={`${ri}-${vi}`} cx={100 + v.x * 720 / 1024} cy={720 - v.y * 720 / 1024} r="5"/>))}{effect?.flowLines.map((line, i) => <polyline key={i} points={line.map(screen).join(' ')}/>)}<polyline points={stroke.map(screen).join(' ')}/></svg>;
-  const toolbar = <div className="canvas-tools">{Object.entries({ move: '移动 V', scale: '缩放', rotate: '旋转', vertices: '顶点', route: '画路线', flow: '水流导线', lasso: '自由套索', rect: '矩形区域' }).map(([key, name]) => <button key={key} disabled={locked || shot.studio !== 'pixi'} className={tool === key ? 'active' : ''} onClick={() => choose(key as Tool)}>{name}</button>)}<button disabled={!actor || locked} onClick={() => change(s => { const a = s.actors.find(a => a.id === selected)!; a.flipX = !a.flipX; })}>镜像</button>{stroke.length > 0 && <button onClick={commitStroke}>完成线段</button>}</div>;
-  return { display, toolbar, overlay, down, move, up, tool, choose };
+  const overlay = <svg className="selection-overlay tool-overlay" viewBox="0 0 1280 720">{current && pos && <g transform={`translate(${100 + pos.x * 720 / 1024} ${720 - pos.y * 720 / 1024}) rotate(${-current.rotation}) scale(${current.scale})`}><rect x={-current.width * 720 / 2048} y={-current.height * 720 / 1024} width={current.width * 720 / 1024} height={current.height * 720 / 1024}/>{[-1, 1].flatMap(x => [0, -current.height * 720 / 1024].map(y => <rect key={`${x},${y}`} x={x * current.width * 720 / 2048 - 4} y={y - 4} width="8" height="8"/>))}</g>}{tool === "vertices" && current?.route.map((p,i) => <circle key={i} cx={100+p.x*720/1024} cy={720-p.y*720/1024} r="5"/>)}{current?.routeVisible && <polyline points={current.route.map(screen).join(' ')}/>} {current?.sortY !== null && current?.sortY !== undefined && <line x1="100" x2="1180" y1={720 - current.sortY * 720 / 1024} y2={720 - current.sortY * 720 / 1024}/>}{tool === 'vertices' && effect?.regions.flatMap((r, ri) => (activeRegion === null || activeRegion === ri ? regionPoints(r) : []).map((v, vi) => <circle key={`${ri}-${vi}`} cx={100 + v.x * 720 / 1024} cy={720 - v.y * 720 / 1024} r="5"/>))}{effect?.flowLines.map((line, i) => <polyline key={i} points={line.map(screen).join(' ')}/>)}<g aria-label="多边形草稿"><polyline points={[...stroke, ...(tool === 'lasso' && hover && stroke.length ? [hover] : [])].map(screen).join(' ')}/>{tool === 'lasso' && stroke.map((p, i) => <circle key={i} cx={100+p.x*720/1024} cy={720-p.y*720/1024} r={i === 0 ? 7 : 4}/>)}</g></svg>;
+  const toolbar = <div className="canvas-tools">{Object.entries({ move: '移动 V', scale: '缩放', rotate: '旋转', vertices: '顶点', route: '画路线', flow: '水流导线', lasso: '多边形套索', rect: '矩形区域' }).map(([key, name]) => <button key={key} disabled={locked || shot.studio !== 'pixi'} className={tool === key ? 'active' : ''} onClick={() => key === 'lasso' ? startRegion() : choose(key as Tool)}>{name}</button>)}<button disabled={!actor || locked} onClick={() => change(s => { const a = s.actors.find(a => a.id === selected)!; a.flipX = !a.flipX; })}>镜像</button>{stroke.length > 0 && <><button onClick={commitStroke}>{tool === 'lasso' ? '闭合范围' : '完成线段'}</button><button onClick={() => { strokeRef.current = strokeRef.current.slice(0, -1); setStroke(strokeRef.current); }}>撤销顶点</button><button onClick={() => choose('move')}>取消绘制</button></>}{tool === 'lasso' && <small>单击放点 · 双击/回首点/Enter 闭合 · Backspace 撤回 · Esc 取消</small>}</div>;
+  return { display, toolbar, overlay, down, move, up, tool, choose, startRegion, hasDraft: stroke.length > 0, doubleClick: () => { if (tool === 'lasso' && strokeRef.current.length >= 3) commitStroke(); } };
 }

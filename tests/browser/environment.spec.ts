@@ -3,10 +3,9 @@ import { readFile } from 'node:fs/promises';
 import { unzipSync } from 'fflate';
 import { sample, effectSchema } from '../../packages/core';
 
-test('weather controls preserve viewport/frame, undo, save and export', async ({ page }) => {
+test('weather controls preserve viewport, undo, save and snapshot export', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto('/'); await expect(page.getByRole('status')).toContainText('影棚已就绪');
-  await page.getByLabel('时间轴').fill('70');
   await page.getByLabel('视图', { exact: true }).selectOption('1.5');
   const area = page.locator('.viewport'); const box = (await area.boundingBox())!;
   await page.mouse.move(box.x + 250, box.y + 120); await page.mouse.down({ button: 'middle' });
@@ -16,18 +15,15 @@ test('weather controls preserve viewport/frame, undo, save and export', async ({
   const dry = await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL());
   await page.getByLabel('添加环境元素').selectOption('rain');
   await page.getByLabel('环境名称').fill('房前雨水');
+  await page.getByLabel('speed',{exact:true}).fill('0');
   const rain = await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL()); expect(rain).not.toBe(dry);
   await page.getByLabel('启用环境元素').uncheck();
   expect(await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL())).toBe(dry);
   await page.getByRole('button', { name: '撤销', exact: true }).click();
   expect(await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL())).toBe(rain);
   expect(await page.locator('.canvas-stack').getAttribute('style')).toBe(transform);
-  await expect(page.getByLabel('时间轴')).toHaveValue('70');
-  await page.getByLabel('时间轴').fill('100'); await page.getByLabel('时间轴').fill('70');
-  expect(await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL())).toBe(rain);
-  const pending = page.waitForEvent('download'); await page.getByRole('button', { name: '输出从当前帧起 1 秒序列' }).click();
-  const files = unzipSync(await readFile((await (await pending).path())!));
-  expect(Buffer.from(files['frame-000070.png']).toString('base64')).toBe(rain.split(',')[1]);
+  const pending=page.waitForEvent('download');await page.getByRole('button',{name:'保存当前帧 PNG'}).click();
+  expect((await readFile((await(await pending).path())!)).toString('base64')).toBe(rain.split(',')[1]);
   await page.getByRole('button', { name: '适应画布' }).click();
   await page.screenshot({ path: 'test-results/weather-rain.png', fullPage: true });
   await page.reload(); await expect(page.getByRole('status')).toContainText('影棚已就绪');
@@ -44,7 +40,7 @@ test('snow fog water and night alter pixels; zero intensity restores scene', asy
     const visible = await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL()); expect(visible).not.toBe(dry);
     await page.getByLabel('intensity', { exact: true }).fill('0');
     expect(await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL())).toBe(dry);
-    await page.getByRole('button', { name: '删除环境元素' }).click();
+    await page.getByRole('button', { name: '删除当前环境元素', exact:true }).click();
   }
   await page.getByLabel('时段', { exact: true }).selectOption('night');
   const moon = await canvas.evaluate((c: HTMLCanvasElement) => c.toDataURL()); expect(moon).not.toBe(dry);

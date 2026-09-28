@@ -26,17 +26,15 @@ test('blank canvas, rain density, wind direction and chapter order', async ({ pa
   const names = await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).chapters.map((c: { name: string }) => c.name));
   expect(names[0]).toBe('第二章');
 });
-test('freehand lasso and vertex drag edit a water region', async ({ page }) => {
+test('point lasso and vertex drag edit a water region', async ({ page }) => {
   await page.goto('/'); await expect(page.getByRole('status')).toContainText('影棚已就绪'); await loaded(page);
   await page.getByLabel('添加环境元素').selectOption('water');
-  await page.getByRole('button', { name: '自由套索', exact: true }).click();
-  const path = [[80, 700], [380, 700], [380, 920], [80, 920], [90, 710]];
-  const start = await logical(page, path[0][0], path[0][1]);
-  await page.mouse.move(start.x, start.y); await page.mouse.down();
-  for (const [x, y] of path.slice(1)) { const point = await logical(page, x, y); await page.mouse.move(point.x, point.y, { steps: 8 }); }
-  await page.mouse.up();
+  await page.getByRole('button', { name: '多边形套索', exact: true }).click();
+  const path = [[80, 700], [380, 700], [380, 920], [80, 920]];
+  for(const [x,y] of path){const p=await logical(page,x,y);await page.mouse.click(p.x,p.y);}
+  await page.keyboard.press('Enter');
   await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].effects[0].regions.length)).toBe(2);
-  await page.getByRole('button', { name: '顶点', exact: true }).click();
+  await page.getByRole('button', { name: '编辑区域 1 顶点', exact: true }).click();
   const corner = await logical(page, 900, 550);
   const next = await logical(page, 1040, 680);
   await page.mouse.move(corner.x, corner.y); await page.mouse.down(); await page.mouse.move(next.x, next.y, { steps: 4 }); await page.mouse.up();
@@ -44,7 +42,7 @@ test('freehand lasso and vertex drag edit a water region', async ({ page }) => {
   const region = await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].effects[0].regions[0]);
   expect(region.points.some((p: { x: number; y: number }) => Math.hypot(p.x - 1040, p.y - 680) < 30)).toBe(true);
 });
-test('overlapping water blocks save and playback; WASD does not rewrite the route', async ({ page }) => {
+test('overlapping water blocks unsafe saves; WASD does not rewrite the route', async ({ page }) => {
   await page.goto('/'); await expect(page.getByRole('status')).toContainText('影棚已就绪'); await loaded(page);
   await expect(page.getByRole('img', { name: '初识元力 缩略图' })).toBeVisible();
   const start = await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].actors[0].start);
@@ -59,10 +57,10 @@ test('overlapping water blocks save and playback; WASD does not rewrite the rout
   await page.getByLabel('添加环境元素').selectOption('water');
   await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].effects.length)).toBe(1);
   await page.getByLabel('添加环境元素').selectOption('water');
-  await expect(page.getByRole('status')).toContainText('水域不能重叠');
-  await expect(page.getByRole('button', { name: '播放' })).toBeDisabled();
+  await expect(page.getByRole('status')).toContainText('水域区域存在重叠');
+  await expect(page.getByRole('button',{name:'播放',exact:true})).toHaveCount(0);
   await expect(page.getByLabel('重叠水域')).toBeVisible();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].effects.length)).toBe(1);
-  await page.getByRole('button', { name: '删除环境元素' }).click();
-  await expect(page.getByRole('button', { name: '播放' })).toBeEnabled();
+  await page.getByRole('button', { name: '删除当前环境元素', exact:true }).click();
+  await expect(page.getByLabel('添加环境元素')).toBeEnabled();
 });
