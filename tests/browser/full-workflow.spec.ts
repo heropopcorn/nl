@@ -10,16 +10,20 @@ test('image drag, one-step undo, scale, rotation, route editing and collision', 
   await page.getByRole('button', { name: '♙ 主角（占位贴图）' }).click();
   const begin = await coordinates(page,460,330), end = await coordinates(page,560,430);
   await page.mouse.move(begin.x,begin.y); await page.mouse.down(); await page.mouse.move(end.x,end.y,{steps:4}); await page.mouse.up();
+  await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].actors[0].start.x)).toBeCloseTo(560, 0);
   let actor = await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].actors[0]);
   expect(actor.start.x).toBeCloseTo(560,0); expect(actor.start.y).toBeCloseTo(400,0);
   await page.getByRole('button',{name:'撤销',exact:true}).click();
+  await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].actors[0].start.x)).toBe(460);
   actor = await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].actors[0]); expect(actor.start.x).toBe(460);
   await page.getByRole('button',{name:'画路线',exact:true}).click();
   for(const p of [[700,300],[900,450]]) { const c=await coordinates(page,p[0],p[1]); await page.mouse.click(c.x,c.y); }
   await page.getByRole('button',{name:'完成线段'}).click();
+  await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].actors[0].route.length)).toBe(3);
   actor = await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].actors[0]); expect(actor.route).toHaveLength(3);
   await page.getByLabel('缩放比例',{exact:true}).fill('1.5'); await page.getByLabel('旋转角度',{exact:true}).fill('30');
   await page.getByRole('button',{name:'镜像',exact:true}).click();
+  await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].actors[0].flipX)).toBe(true);
   actor = await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].actors[0]); expect(actor).toMatchObject({scale:1.5,rotation:30,flipX:true});
 });
 test('custom resource upload and IndexedDB persistence', async ({ page }) => {
@@ -50,6 +54,7 @@ test('chapters, scenes and immutable scene-set snapshots',async({page})=>{
   await start(page);page.on('dialog',d=>d.accept('新章节'));
   await page.getByRole('button',{name:'新建章节',exact:true}).click();await expect(page.locator('.project-tree summary').filter({hasText:'新章节'})).toBeVisible();
   await page.getByRole('button',{name:'保存布景版本'}).click();
+  await expect.poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).sets.length)).toBe(1);
   const p=await page.evaluate(()=>JSON.parse(localStorage.getItem('yuanli.web-director.v1')!));expect(p.sets).toHaveLength(1);
   await page.getByLabel('镜头名称',{exact:true}).fill('改名');const changed=await page.evaluate(()=>JSON.parse(localStorage.getItem('yuanli.web-director.v1')!));expect(changed.sets[0].content.name).not.toBe('改名');
 });

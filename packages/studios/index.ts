@@ -15,7 +15,7 @@ class PixiStudio implements Studio {
     this.app.stage.removeChildren().forEach(child => child.destroy());
     if (shot.blank) {
       const panel = new Graphics();
-      panel.rect(100, 0, 1080, 720).fill(0x8a8172);
+      panel.rect(100, 0, 1080, 720).fill(shot.blankColor);
       this.app.stage.addChild(panel);
     } else {
       if (!this.textures[backgroundUrl]) throw new Error('背景尚未加载');

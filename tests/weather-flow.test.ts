@@ -3,7 +3,7 @@ import { effectSchema, sample } from '../packages/core';
 import { flowDirection } from '../packages/core/flow';
 import { imageCorners } from '../packages/core/handles';
 import { overlappingWaterIds, regionsOverlap, simplifyPolyline, snapCoordinate } from '../packages/core/geometry';
-import { fallDirection, gustSpeedScale, rainMarks, rainSamples, rainStreamCount, resolveWind, windVisualScale } from '../packages/studios/weather';
+import { fallDirection, gusts, gustSpeedScale, rainMarks, rainSamples, rainStreamCount, resolveWind, windVisualScale } from '../packages/studios/weather';
 
 describe('flow field', () => {
   it('matches the Godot distance-weighted cases', () => {
@@ -23,6 +23,36 @@ describe('flow field', () => {
 });
 
 describe('rain and wind', () => {
+  it('reveals fixed wind geometry without moving or refitting its curve', () => {
+    const wind = resolveWind({ ...sample.shots[0].wind, enabled: true, strength: 0.6, gust: 0, speed: 1 });
+    const first = gusts(30, wind), next = gusts(31, wind);
+    const shared = first.filter(a => next.some(b => b.id === a.id));
+    expect(shared.length).toBeGreaterThan(5);
+    for (const a of shared) {
+      const b = next.find(b => b.id === a.id)!;
+      expect(a.points.map(({ x, y }) => ({ x, y }))).toEqual(b.points.map(({ x, y }) => ({ x, y })));
+      expect(a.hook).toEqual(b.hook);
+      expect(a.points[0].alpha).toBe(0);
+      expect(a.points.at(-1)!.alpha).toBe(0);
+    }
+    expect(first).not.toEqual(next);
+    expect(gusts(30, wind)).toEqual(first);
+    expect(gusts(1000, { ...wind, speed: 0 })).toEqual(gusts(0, { ...wind, speed: 0 }));
+    expect(gusts(30, { ...wind, enabled: false })).toEqual([]);
+    expect(gusts(30, { ...wind, strength: 0 }).length).toBeGreaterThan(0);
+  });
+  it('supports all eight screen directions and changes geometry on the next cycle', () => {
+    const wind = resolveWind({ ...sample.shots[0].wind, enabled: true, strength: 1, gust: 0, speed: 1 });
+    for (const [x, y] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+      const directed = resolveWind({ ...sample.shots[0].wind, ...wind, direction: { x, y } });
+      for (const gust of gusts(40, directed)) {
+        const a = gust.points[0], b = gust.points.at(-1)!;
+        expect((b.x - a.x) * x + (b.y - a.y) * y).toBeGreaterThan(0);
+        expect(Math.abs((b.x - a.x) * y - (b.y - a.y) * x)).toBeLessThan(0.00001);
+      }
+    }
+    expect(gusts(180, wind).map(g => g.id)).not.toEqual(gusts(30, wind).map(g => g.id));
+  });
   const full = { x: 0, y: 0, width: 1536, height: 1024 };
   const rain = () => effectSchema.parse({ id: 'rain', name: '雨', type: 'rain', regions: [full] });
   it('separates density from intensity and caps the Godot stream formula', () => {

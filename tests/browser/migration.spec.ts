@@ -40,6 +40,7 @@ test('freehand lasso and vertex drag edit a water region', async ({ page }) => {
   const corner = await logical(page, 900, 550);
   const next = await logical(page, 1040, 680);
   await page.mouse.move(corner.x, corner.y); await page.mouse.down(); await page.mouse.move(next.x, next.y, { steps: 4 }); await page.mouse.up();
+  await expect.poll(async () => page.evaluate(() => !!JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].effects[0].regions[0].points)).toBe(true);
   const region = await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].effects[0].regions[0]);
   expect(region.points.some((p: { x: number; y: number }) => Math.hypot(p.x - 1040, p.y - 680) < 30)).toBe(true);
 });

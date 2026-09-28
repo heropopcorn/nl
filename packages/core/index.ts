@@ -13,6 +13,7 @@ export const effectSchema = z.object({
   splashes: z.boolean().default(true), sortY: z.number().min(0).max(1024).nullable().default(null),
   regions: z.array(rectSchema).min(1).max(12),
   collisionEnabled: z.boolean().default(false), flowLines: z.array(z.array(point).min(2).max(128)).max(16).default([]),
+  flowVector: point.nullable().default(null),
 });
 export type Effect = z.infer<typeof effectSchema>;
 export const lightingSchema = z.object({ time: z.enum(['morning', 'noon', 'evening', 'night']).default('noon'), ambient: z.number().min(0).max(1).default(0.35), moon: z.number().min(0).max(1).default(0.65) });
@@ -27,6 +28,8 @@ export const shotSchema = z.object({
   sceneId: z.string().default('scene-1'), setRef: z.string().nullable().default(null),
   backgroundAssetId: z.string().nullable().default(null), backgroundVersions: z.object({ x2: z.string().optional(), x4: z.string().optional() }).default({}),
   blank: z.boolean().default(false),
+  blankColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#8a8172'),
+  legacySource: z.record(z.string(), z.unknown()).nullable().default(null),
   collisionEnabled: z.boolean().default(true), snap: z.number().min(0).max(128).default(0),
   wind: z.object({
     enabled: z.boolean().default(false), strength: z.number().min(-1).max(1).default(0.45), speed: z.number().min(0).max(4).default(1),

@@ -3,7 +3,7 @@ import { containsPoint, regionPoints } from '../core/geometry';
 import { flowDirection } from '../core/flow';
 import { actorPosition } from '../core/routes';
 import type { MediaAsset } from '../core/media';
-import { gusts, rainMarks, rainSamples, resolveWind } from './weather';
+import { gusts, lightningFlash, rainMarks, rainSamples, resolveWind } from './weather';
 
 export const random = (seed: number) => { let x = Math.imul(seed ^ 0x9e3779b9, 0x85ebca6b); x ^= x >>> 13; return (Math.imul(x, 0xc2b2ae35) >>> 0) / 4294967296; };
 export type DrawItem = { layer: number; y: number; draw: () => void };
@@ -85,7 +85,7 @@ export function compositeEnvironment(ctx: CanvasRenderingContext2D, shot: Shot, 
           } else {
             ctx.fillStyle = `rgba(28,145,176,${effect.intensity * 0.25})`; ctx.fillRect(x, y, w, h);
             ctx.strokeStyle = `rgba(170,239,255,${effect.intensity * 0.7})`; ctx.lineWidth = 1.4;
-            const fallback = { x: effect.wind < 0 ? -1 : 1, y: 0 };
+            const fallback = effect.flowVector ?? { x: effect.wind < 0 ? -1 : 1, y: 0 };
             for (let i = 0; i < 48; i++) {
               const origin = { x: r.x + random(effect.seed + i * 7) * r.width, y: r.y + random(effect.seed + i * 7 + 1) * r.height };
               if (!containsPoint(r, origin)) continue;
@@ -104,10 +104,21 @@ export function compositeEnvironment(ctx: CanvasRenderingContext2D, shot: Shot, 
   ctx.save(); ctx.beginPath(); ctx.rect(100, 0, 1080, 720); ctx.clip();
   items.sort(depthCompare).forEach(item => item.draw());
   const sceneWind = resolveWind(shot.wind);
+  ctx.lineCap = 'round';
   for (const gust of gusts(frame, sceneWind)) {
-    ctx.strokeStyle = `rgba(223,242,244,${gust.alpha})`; ctx.lineWidth = 1.1;
-    ctx.beginPath(); ctx.moveTo(gust.x1, gust.y1); ctx.quadraticCurveTo((gust.x1 + gust.x2) / 2 - sceneWind.y * 8, (gust.y1 + gust.y2) / 2 + sceneWind.x * 8, gust.x2, gust.y2); ctx.stroke();
-    if (gust.hooked) { ctx.beginPath(); ctx.moveTo(gust.x2, gust.y2); ctx.quadraticCurveTo(gust.x2 + sceneWind.y * 8, gust.y2 - sceneWind.x * 8, gust.hookX, gust.hookY); ctx.stroke(); }
+    const stroke = (points: { x: number; y: number; alpha?: number }[], hook = false) => {
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1], b = points[i];
+        const fade = hook ? gust.hookAlpha * (1 - i / points.length) : ((a.alpha ?? 0) + (b.alpha ?? 0)) / 2;
+        if (fade < 0.01) continue;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+        ctx.lineWidth = gust.width * Math.sqrt(fade) + 0.9;
+        ctx.strokeStyle = `rgba(87,107,99,${gust.alpha * fade * 0.3})`; ctx.stroke();
+        ctx.lineWidth = gust.width * Math.sqrt(fade);
+        ctx.strokeStyle = `rgba(245,237,196,${gust.alpha * fade})`; ctx.stroke();
+      }
+    };
+    stroke(gust.points); stroke(gust.hook, true);
   }
   const light = shot.lighting;
   if (light.time === 'morning' || light.time === 'evening') {
@@ -120,8 +131,7 @@ export function compositeEnvironment(ctx: CanvasRenderingContext2D, shot: Shot, 
   }
   const raining = shot.effects.some(effect => effect.enabled && effect.type === 'rain' && effect.intensity > 0 && effect.density > 0);
   if (shot.lightning.enabled && raining) {
-    const phase = frame / 30 % shot.lightning.interval;
-    const flash = Math.max(Math.exp(-phase * 18), Math.exp(-Math.abs(phase - 0.18) * 34) * 0.72) * shot.lightning.intensity;
+    const flash = lightningFlash(frame, shot.lightning.interval) * shot.lightning.intensity;
     ctx.fillStyle = `rgba(218,235,255,${flash * 0.65})`; ctx.fillRect(100, 0, 1080, 720);
     if (flash > 0.1) { ctx.strokeStyle = `rgba(240,250,255,${flash})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(840, 0); ctx.lineTo(780, 100); ctx.lineTo(820, 90); ctx.lineTo(720, 250); ctx.stroke(); }
   }

@@ -28,6 +28,13 @@ function hash01(value: number) {
   return x - Math.floor(x);
 }
 
+/** Match the old deterministic random-offset, double-flash envelope. */
+export function lightningFlash(frame: number, interval: number) {
+  const time = Math.max(0, frame / 30), event = Math.floor(time / interval);
+  const phase = time % interval - (event === 0 ? 0 : hash01(event * 19.73) * interval * 0.52);
+  return phase < 0 ? 0 : Math.max(Math.exp(-phase * 18), Math.exp(-Math.abs(phase - 0.18) * 34) * 0.72);
+}
+
 export function rainStreamCount(effect: Pick<Effect, 'intensity' | 'density'>, region: Region) {
   if (effect.intensity <= 0 || effect.density <= 0) return 0;
   const desired = Math.round(regionUvArea(region) * (150 + 9000 * effect.density ** 4));
@@ -125,12 +132,17 @@ export function rainMarks(effect: Effect, frame: number, regionIndex: number, wi
   return marks;
 }
 
-export type Gust = { x1: number; y1: number; x2: number; y2: number; hookX: number; hookY: number; alpha: number; hooked: boolean };
+export type Gust = { id: string; points: (Point & { alpha: number })[]; hook: Point[]; alpha: number; hookAlpha: number; width: number };
+
+const smooth = (a: number, b: number, value: number) => {
+  const t = Math.max(0, Math.min(1, (value - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 
 /** Canvas stand-in for wind.gdshader: strands stay put and grow along the wind, with a 1×–20× cycle and an occasional short hook. */
 export function gusts(frame: number, wind: ResolvedWind): Gust[] {
-  if (!wind.enabled || wind.strength <= 0) return [];
-  const clock = frame / 30 * gustSpeedScale(wind.gust) * Math.max(wind.speed, 0.05);
+  if (!wind.enabled) return [];
+  const clock = frame / 30 * gustSpeedScale(wind.gust) * Math.max(wind.speed, 0);
   const visual = windVisualScale(wind.strength);
   const result: Gust[] = [];
   for (let i = 0; i < 42; i++) {
@@ -140,19 +152,35 @@ export function gusts(frame: number, wind: ResolvedWind): Gust[] {
     const keep = hash01(cellX * 13.1 + cellY * 7.7 + cycle * 3.1);
     if (keep > 0.35 + wind.strength * 0.45) continue;
     const origin = { x: 100 + (cellX + 0.15 + hash01(i + cycle * 9.2) * 0.7) * (1080 / 7), y: (cellY + 0.2 + hash01(i + 4.4 + cycle) * 0.6) * (720 / 6) };
-    const length = (90 + hash01(i + 8.8) * 150) * visual;
+    // Strength changes coverage/weight, not the length of every strand.
+    const length = 110 + hash01(i + cycle * 8.8) * 180;
     const head = Math.min(1, life / 0.58), tail = Math.max(0, (life - 0.28) / 0.72);
-    const bow = (hash01(i + 1.7) - 0.5) * 28 * visual;
-    const start = tail, end = head;
-    if (end - start < 0.04) continue;
+    const bow = (hash01(i + cycle * 3.7 + 1.7) - 0.5) * 38;
+    const phase = hash01(i + cycle * 7.3) * Math.PI * 2;
     const at = (t: number) => ({
-      x: origin.x + wind.x * length * t - wind.y * Math.sin(t * Math.PI) * bow,
-      y: origin.y + wind.y * length * t + wind.x * Math.sin(t * Math.PI) * bow,
+      x: origin.x + wind.x * length * t - wind.y * Math.sin(t * Math.PI) * (bow + Math.sin(t * Math.PI * 2 + phase) * 5),
+      y: origin.y + wind.y * length * t + wind.x * Math.sin(t * Math.PI) * (bow + Math.sin(t * Math.PI * 2 + phase) * 5),
     });
-    const a = at(start), b = at(end);
-    const hooked = hash01(i + cycle * 1.9) > 0.76 && head > 0.72;
-    const tip = at(Math.min(head, 0.92));
-    result.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, hookX: tip.x + wind.y * 18, hookY: tip.y - wind.x * 18, alpha: (0.18 + wind.strength * 0.35) * (1 - tail), hooked });
+    // Sample the whole immutable centerline. Only opacity changes during a cycle;
+    // fitting a new quadratic to the revealed endpoints makes the strand crawl.
+    const points = Array.from({ length: 65 }, (_, n) => {
+      const t = n / 64;
+      return { ...at(t), alpha: smooth(0, 0.08, t) * (1 - smooth(0.88, 1, t)) * smooth(tail, tail + 0.06, t) * (1 - smooth(head - 0.06, head, t)) };
+    });
+    const tip = at(0.94), before = at(0.93);
+    const tangentLength = Math.hypot(tip.x - before.x, tip.y - before.y);
+    const dx = (tip.x - before.x) / tangentLength, dy = (tip.y - before.y) / tangentLength;
+    const bend = bow < 0 ? -1 : 1;
+    const control = { x: tip.x + dx * 9, y: tip.y + dy * 9 };
+    const end = { x: tip.x + dx * 11 - dy * bend * 5, y: tip.y + dy * 11 + dx * bend * 5 };
+    const hook = Array.from({ length: 9 }, (_, n) => {
+      const t = n / 8, s = 1 - t;
+      return { x: s * s * tip.x + 2 * s * t * control.x + t * t * end.x, y: s * s * tip.y + 2 * s * t * control.y + t * t * end.y };
+    });
+    result.push({ id: `${i}:${cycle}`, points, hook,
+      alpha: 0.65 + wind.strength * 0.2,
+      hookAlpha: hash01(i + cycle * 1.9) > 0.76 ? smooth(0.94, 1, head) * (1 - smooth(0.82, 0.95, life)) : 0,
+      width: (0.65 + (i % 3) * 0.18) * (1 + Math.max(0, visual - 1) * 0.175) });
   }
   return result;
 }

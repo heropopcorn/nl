@@ -1,21 +1,66 @@
 import { projectSchema, type Project } from '../../../packages/core';
 const KEY = 'yuanli.web-director.v1';
+const BACKUPS = `${KEY}.backups`;
+const PENDING = `${KEY}.pending`;
+export type ProjectBackup = { id: string; time: number; project: Project };
 function db(): Promise<IDBDatabase> { return new Promise((resolve, reject) => { const req = indexedDB.open('yuanli-director', 1); req.onupgradeneeded = () => req.result.createObjectStore('documents'); req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); }); }
-export async function loadProject(): Promise<Project | null> {
-  const local = localStorage.getItem(KEY);
-  if (local) { try { return projectSchema.parse(JSON.parse(local)); } catch { /* Keep invalid source untouched; try the last durable copy. */ } }
+async function read(key: string): Promise<unknown> {
   const store = await db();
-  try { return await new Promise((resolve, reject) => { const request = store.transaction('documents').objectStore('documents').get(KEY); request.onsuccess = () => { const p = projectSchema.safeParse(request.result); resolve(p.success ? p.data : null); }; request.onerror = () => reject(request.error); }); } finally { store.close(); }
+  try { return await new Promise((resolve, reject) => { const request = store.transaction('documents').objectStore('documents').get(key); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); } finally { store.close(); }
+}
+export async function listProjectBackups(): Promise<ProjectBackup[]> {
+  const raw = await read(BACKUPS);
+  return (Array.isArray(raw) ? raw : []).flatMap(item => { const p = projectSchema.safeParse(item.project); return p.success ? [{ id: String(item.id), time: Number(item.time), project: p.data }] : []; });
+}
+export async function loadProject(onRecovered?: () => void): Promise<Project | null> {
+  // Small edits have a synchronous write-ahead journal: a refresh must not lose
+  // an edit whose IndexedDB transaction was interrupted by page teardown.
+  try { const pending = localStorage.getItem(PENDING); if (pending) { const p = projectSchema.safeParse(JSON.parse(pending)); if (p.success) return p.data; } } catch { /* Fall back to durable storage. */ }
+  // IndexedDB is authoritative; localStorage may be a stale mirror after quota errors.
+  let failure: unknown;
+  try { const p = projectSchema.safeParse(await read(KEY)); if (p.success) return p.data; } catch (error) { failure = error; }
+  try { const local = localStorage.getItem(KEY); if (local) { const p = projectSchema.safeParse(JSON.parse(local)); if (p.success) return p.data; } } catch { /* Try historical snapshots next. */ }
+  try { const backups = await listProjectBackups(); if (backups.length) { onRecovered?.(); return backups[0].project; } } catch (error) { failure = error; }
+  if (failure) throw failure;
+  return null;
 }
 let queue = Promise.resolve();
-export function saveProject(project: Project) {
-  const json = JSON.stringify(project);
-  if (json.length < 2_000_000) { try { localStorage.setItem(KEY, json); } catch { /* IndexedDB remains authoritative. */ } }
+let revision = 0, pendingSaves = 0;
+export const hasPendingSaves = () => pendingSaves > 0;
+export function saveProject(project: Project, checkpoint = false) {
+  const snapshot = projectSchema.parse(project), json = JSON.stringify(snapshot);
+  const currentRevision = ++revision;
+  pendingSaves++;
+  if (json.length < 2_000_000) {
+    try { localStorage.setItem(PENDING, json); localStorage.setItem(KEY, json); } catch { /* Do not claim durability before the database commits. */ }
+  } else {
+    // An old small-project journal must never override a newer large project.
+    try { localStorage.removeItem(PENDING); } catch { /* Closing is guarded below. */ }
+  }
   const job = queue.catch(() => {}).then(async () => {
     const store = await db();
-    try { await new Promise<void>((resolve, reject) => { const transaction = store.transaction('documents', 'readwrite'); transaction.objectStore('documents').put(project, KEY); transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); transaction.onabort = () => reject(transaction.error); }); } finally { store.close(); }
-    if (json.length >= 2_000_000) localStorage.removeItem(KEY);
-  }); queue = job; return job;
+    try { await new Promise<void>((resolve, reject) => {
+      const transaction = store.transaction('documents', 'readwrite'), documents = transaction.objectStore('documents');
+      const old = documents.get(KEY), history = documents.get(BACKUPS);
+      history.onsuccess = () => {
+        const backups: ProjectBackup[] = Array.isArray(history.result) ? history.result : [];
+        const previous = projectSchema.safeParse(old.result);
+        const candidate = checkpoint ? snapshot : previous.success ? previous.data : null;
+        if (candidate && (checkpoint || !backups.length || Date.now() - backups[0].time >= 60_000) && (checkpoint || JSON.stringify(candidate) !== json)) {
+          backups.unshift({ id: crypto.randomUUID(), time: Date.now(), project: candidate });
+          // Bound both count and bytes; a large project still keeps one recoverable copy.
+          backups.splice(5);
+          while (backups.length > 1 && JSON.stringify(backups).length > 150_000_000) backups.pop();
+          documents.put(backups, BACKUPS);
+        }
+        documents.put(snapshot, KEY);
+      };
+      transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(transaction.error); transaction.onabort = () => reject(transaction.error);
+    }); } finally { store.close(); }
+    if (revision === currentRevision) {
+      try { if (json.length < 2_000_000) localStorage.setItem(KEY, json); else localStorage.removeItem(KEY); localStorage.removeItem(PENDING); } catch { /* Durable copy committed successfully. */ }
+    }
+  }).finally(() => { pendingSaves--; }); queue = job; return job;
 }
 export async function importMedia(file: File, category: Project['assets'][number]['category']) {
   if (file.size > 20 * 1024 * 1024) throw new Error('单个资源最大 20MB');
