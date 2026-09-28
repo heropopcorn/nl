@@ -1,0 +1,17 @@
+.left { padding: 12px 10px; }
+.left h2 { margin-bottom: 8px; }
+.left > .row { padding: 5px 7px; margin-bottom: 3px; }
+.left .environment-list { margin-top: 14px; padding-top: 10px; }
+.resource-library { margin-top: 14px; padding-top: 10px; }
+.resource-library .button-row { display: flex; gap: 4px; }
+.resource-library .button-row button { flex: 1; padding: 5px; font-size: 11px; }
+.resource-library label { margin: 6px 0; }
+.resource-library input, .resource-library select { padding: 5px; }
+.resource-items { display: grid; gap: 4px; margin-top: 7px; }
+.resource-library .asset { display: flex; align-items: center; gap: 7px; min-height: 42px; padding: 3px; margin: 0; }
+.resource-library .asset img { width: 52px; height: 36px; flex: 0 0 52px; object-fit: contain; background: #111923; }
+.resource-library .asset span { padding: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.resource-library .muted { margin: 6px 0; line-height: 1.5; }
+.resource-items > div > button:not(.asset) { padding: 3px 6px; font-size: 11px; margin-top: 3px; }
+.resource-library .sprite-settings { display: flex; gap: 4px; }
+.resource-library .sprite-settings label { min-width: 0; font-size: 10px; }

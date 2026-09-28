@@ -4,6 +4,7 @@ import { actorPosition } from '../core/routes';
 import type { MediaAsset } from '../core/media';
 import { gusts, lightningFlash, rainMarks, rainSamples, resolveWind } from './weather';
 import type { WaterSurface } from './water';
+import { drawRainSplash } from './rain-splash';
 
 export const random = (seed: number) => { let x = Math.imul(seed ^ 0x9e3779b9, 0x85ebca6b); x ^= x >>> 13; return (Math.imul(x, 0xc2b2ae35) >>> 0) / 4294967296; };
 export type DrawItem = { layer: number; y: number; draw: () => void };
@@ -57,7 +58,7 @@ export function compositeEnvironment(ctx: CanvasRenderingContext2D, shot: Shot, 
             ctx.strokeStyle = `rgba(209,231,255,${0.45 + effect.intensity * 0.35})`;
             ctx.lineWidth = Math.max(0.52, Math.min(1.55, 0.85 * mark.size));
             if (mark.airborne) { ctx.beginPath(); ctx.moveTo(mark.tailX, mark.tailY); ctx.lineTo(mark.headX, mark.headY); ctx.stroke(); }
-            else { ctx.globalAlpha = 1 - mark.splash; ctx.beginPath(); ctx.ellipse(mark.landingX, mark.landingY, (1 + mark.splash * 9) * mark.size, (1 + mark.splash * 3) * mark.size, 0, 0, Math.PI * 2); ctx.stroke(); }
+            else drawRainSplash(ctx, mark);
             ctx.restore();
           } });
         }

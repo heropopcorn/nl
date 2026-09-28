@@ -6,6 +6,30 @@ async function point(page: Page, x: number, y: number) { const b = (await page.g
 async function click(page: Page, x: number, y: number) { const p = await point(page,x,y); await page.mouse.click(p.x,p.y); }
 const pixels = (page: Page) => page.getByLabel('影棚预览').evaluate((c: HTMLCanvasElement) => c.toDataURL());
 
+test('show all region outlines allows direct subregion selection without changing geometry', async ({page}) => {
+  await ready(page);
+  const toggle = page.getByLabel('显示所有元素区域');
+  await expect(toggle).not.toBeChecked();
+  await page.getByLabel('添加环境元素').selectOption('fog');
+  await page.getByRole('button', {name:'多边形套索',exact:true}).click();
+  await click(page,300,300); await click(page,600,300); await click(page,450,500);
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', {name:'移动 V',exact:true}).click();
+  await page.getByRole('button', {name:'▧ 背景画布',exact:true}).click();
+  await expect(page.getByLabel('选中范围辅助线').locator('polygon')).toHaveCount(0);
+  await toggle.check();
+  await expect(page.getByRole('button',{name:'选中 雾气 1 区域 2',exact:true})).toHaveCount(1);
+  const before = await project(page);
+  await click(page,450,300);
+  await expect(page.getByLabel('环境名称')).toHaveValue('雾气 1');
+  await expect(page.locator('.active-region')).toContainText('区域 2');
+  expect((await project(page)).shots[0].effects).toEqual(before.shots[0].effects);
+  await toggle.uncheck();
+  await expect(page.getByLabel('选中范围辅助线').locator('polygon')).toHaveCount(2);
+  await page.getByRole('button', {name:'▧ 背景画布',exact:true}).click();
+  await expect(page.getByLabel('选中范围辅助线').locator('polygon')).toHaveCount(0);
+});
+
 test('no timeline or play controls; rain animates immediately without moving actors or view', async ({ page }) => {
   await ready(page);
   await expect(page.getByLabel('时间轴', { exact: true })).toHaveCount(0);
