@@ -1,0 +1,17 @@
+.sprite-editor { display: grid; grid-template-columns: 270px minmax(0, 1fr); gap: 18px; height: calc(100% - 45px); }
+.sprite-controls, .sprite-workspace { overflow: auto; }
+.sprite-controls fieldset { display: block; border: 0; padding: 0 10px 0 0; }
+.sprite-controls label { width: 100%; }
+.sprite-controls button { margin: 4px 3px 4px 0; }
+.sprite-controls h3 { border-top: 1px solid #39485b; padding-top: 14px; }
+.sprite-previews { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sprite-stage { height: 280px; background: repeating-conic-gradient(#232d3b 0 25%, #18212c 0 50%) 0 / 20px 20px; display: flex; justify-content: center; align-items: center; }
+.sprite-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.sprite-frames { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+.sprite-frames article { padding: 5px; border: 1px solid #435268; border-radius: 5px; }
+.sprite-frames article.selected { border-color: #7cdfc6; }
+.sprite-frames article.disabled { opacity: .45; }
+.sprite-frames img { width: 100%; height: 90px; object-fit: contain; }
+.sprite-frames article > button:first-child { width: 100%; padding: 0; }
+.sprite-frames button { font-size: 11px; padding: 4px; }
+.category-creator input { margin-top: 4px; }

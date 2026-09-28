@@ -1,4 +1,35 @@
 import { test, expect } from '@playwright/test';
+import { nlAssets } from '../../packages/core/nl-assets';
+
+test('large resource browser previews and applies all imported NL-UI images', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('footer')).toContainText('影棚已就绪');
+  expect(nlAssets).toHaveLength(20);
+  for (const asset of nlAssets) expect((await page.request.get(asset.src)).ok()).toBe(true);
+  await expect(page.locator('.resource-items .asset')).toHaveCount(6);
+  const before = await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].backgroundAssetId);
+  await page.getByRole('button', { name: '更多资源…', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '更多资源' });
+  await expect(dialog).toBeVisible();
+  const box = (await dialog.boundingBox())!;
+  expect(box.width * box.height / (1440 * 960)).toBeGreaterThan(0.8);
+  await expect(dialog.locator('.asset')).toHaveCount(9);
+  await dialog.getByRole('button', { name: '东南小村 · 村庄主区地皮', exact: true }).click();
+  await expect(dialog.getByRole('img', { name: '东南小村 · 村庄主区地皮' })).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].backgroundAssetId)).toBe(before);
+  await page.screenshot({path:'test-results/resource-browser.png'});
+  page.on('dialog', d => d.accept());
+  await dialog.getByRole('button', {name:'应用到场景',exact:true}).click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('yuanli.web-director.v1')!).shots[0].backgroundAssetId)).toBe('nl_ground_village_main');
+  await dialog.getByLabel('资源分类').selectOption('houses');
+  await dialog.getByLabel('搜索资源').fill('东南小村');
+  await expect(dialog.locator('.asset')).toHaveCount(14);
+  await dialog.getByRole('button', {name:'东南小村 · 主角家',exact:true}).click();
+  await dialog.getByRole('button', {name:'应用到场景',exact:true}).click();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByLabel('元素名称')).toHaveValue('东南小村 · 主角家');
+});
 
 test('compact unified resource library groups backgrounds and props', async ({ page }) => {
   await page.goto('/');
