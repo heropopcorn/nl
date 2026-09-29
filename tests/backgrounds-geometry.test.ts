@@ -6,7 +6,7 @@ import { resolveBackground, manifestSchema } from '../packages/core/backgrounds'
 import { particles } from '../packages/studios/environment';
 describe('background variants and logical coordinates', () => {
   it('discovers original and 24 seasonal images with actual dimensions', () => {
-    const manifest = manifestSchema.parse(JSON.parse(readFileSync('apps/director-web/public/assets.json', 'utf8')));
+    const manifest = manifestSchema.parse(JSON.parse(readFileSync('apps/director-web/.generated/preview-full/assets.json', 'utf8')));
     expect(Object.keys(manifest)).toHaveLength(26);
     expect(manifest.protagonist_village.default).toMatchObject({ width: 1536, height: 1024 });
     expect(manifest.village_school_winter_late.default.url).toContain('winter_late');

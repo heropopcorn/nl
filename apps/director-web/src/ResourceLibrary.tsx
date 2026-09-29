@@ -1,3 +1,4 @@
+import { availableAsset } from './runtime';
 import { SpritesheetEditor } from './SpritesheetEditor';
 import { CategoryCreator } from './CategoryCreator';
 import { ResourceDialog } from './ResourceDialog';
@@ -16,7 +17,7 @@ export function ResourceLibrary({ project, shot, edit, select, notify, manifest 
   const [preview, setPreview] = useState<{ name: string; src: string; category: string; apply: () => Promise<void> | void } | null>(null);
   const [applying, setApplying] = useState(false);
   const choose = (item: NonNullable<typeof preview>) => { if (expanded) setPreview(item); else Promise.resolve(item.apply()).catch(e => notify(String(e))); };
-  const assets = (custom ? project.assets : builtinAssets).filter(a => (folder ? a.customCategoryId === folder.id : a.category === category && !a.customCategoryId) && a.name.includes(search.trim()));
+  const assets = (custom ? project.assets : builtinAssets.filter(a => availableAsset(a.src))).filter(a => (folder ? a.customCategoryId === folder.id : a.category === category && !a.customCategoryId) && a.name.includes(search.trim()));
   const backgrounds = !custom && category === 'backgrounds' ? ([['protagonist_village', '村庄'], ['village_school', '村庄学校']] as const).filter(([, name]) => name.includes(search.trim())) : [];
   async function place(asset: MediaAsset) {
     if (asset.category === 'models') { if (shot.studio !== 'three') { notify('模型请放入 3D 镜头'); return; } edit(p => p.shots.find(s => s.id === shot.id)!.objects3d.push(object3dSchema.parse({ id: crypto.randomUUID(), name: asset.name, shape: 'model', assetId: asset.id }))); return; }

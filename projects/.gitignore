@@ -1,0 +1,7 @@
+# Project documents and media are intentionally versioned. Runtime state is not.
+**/.workspace.lock
+**/backups/
+**/exports/
+**/.trash/
+**/.import-*/
+**/*.tmp

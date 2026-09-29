@@ -4,6 +4,7 @@ import { cutoutFrame } from '../../../packages/spritesheet/spriteCutout';
 import { DEFAULT_EXTRACT_SETTINGS, DEFAULT_PACK_SETTINGS, moveItem, revokeFrameUrls, type SpriteFrame } from '../../../packages/spritesheet/spriteFrames';
 import { drawSpritesheet, layoutSpritesheet, spritesheetJson } from '../../../packages/spritesheet/spritePack';
 import { canvasToBlob, loadImageFromFile } from '../../../packages/spritesheet/images';
+import type { SpriteWork } from './sprite-draft-storage';
 
 export function useSpritesheet() {
   const [name, setName] = useState('新序列帧'), [video, setVideo] = useState<File | null>(null);
@@ -27,7 +28,13 @@ export function useSpritesheet() {
     catch (e) { if (lifetime.current.alive) setStatus(`处理失败：${e instanceof Error ? e.message : String(e)}`); }
     finally { if (lifetime.current.alive) setBusy(false); }
   }
-  function chooseVideo(file: File) { setVideo(file); setName(file.name.replace(/\.[^.]+$/, '')); revokeFrameUrls(frames); changeFrames([]); setSelected(''); setStatus(''); }
+  function chooseVideo(file: File) { setPlaying(false); setVideo(file); setName(file.name.replace(/\.[^.]+$/, '')); revokeFrameUrls(frames); changeFrames([]); setSelected(''); setStatus(''); }
+  function restore(work: SpriteWork) {
+    revokeFrameUrls(frames); invalidate();
+    setName(work.name); setVideo(work.video); setFrames(work.frames); setExtract(work.extract); setPack(work.pack);
+    setThreshold(work.threshold); setCrop(work.crop); setFps(work.fps); setPacked(work.packed);
+    setSelected(work.frames[0]?.id ?? ''); setPlaying(false); setIndex(0); setStatus('已读取本地制作草稿');
+  }
   const extractNow = () => run(async () => {
     if (!video) throw new Error('请先选择视频');
     const result = await extractFramesFromVideo(video, extract, p => { if (lifetime.current.alive) setStatus(`抽帧 ${p.current} / ${p.total}`); }, lifetime.current.abort.signal);
@@ -53,7 +60,7 @@ export function useSpritesheet() {
     if (!lifetime.current.alive) return;
     invalidate(); setPacked({ blob, layout, json: spritesheetJson(layout), url: URL.createObjectURL(blob) });
   });
-  return { name, setName, video, chooseVideo, frames, selected, setSelected, active, extract, setExtract, pack, setPack: (value: typeof pack) => { invalidate(); setPack(value); }, threshold, setThreshold, crop, setCrop, busy, status, playing, setPlaying, index, setIndex, fps, setFps, packed, extractNow, cutout, packNow,
+  return { name, setName, video, chooseVideo, restore, frames, selected, setSelected, active, extract, setExtract, pack, setPack: (value: typeof pack) => { invalidate(); setPack(value); }, threshold, setThreshold, crop, setCrop, busy, status, playing, setPlaying, index, setIndex, fps, setFps, packed, extractNow, cutout, packNow,
     toggle: (id: string, enabled: boolean) => changeFrames(frames.map(f => f.id === id ? { ...f, enabled } : f)),
     enableAll: (enabled: boolean) => changeFrames(frames.map(f => ({ ...f, enabled }))),
     reorder: (from: number, to: number) => changeFrames(moveItem(frames, from, to)),

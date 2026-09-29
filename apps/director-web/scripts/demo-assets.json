@@ -1,0 +1,5 @@
+{
+  "builtinIds": ["player", "farmer_blue", "tree_oak", "house_blue_cottage", "legacy_village", "nl_ground_village_main", "nl_asset_protagonist_house"],
+  "seasons": ["", "spring_early", "summer_mid", "autumn_mid", "winter_mid"],
+  "qualities": ["default"]
+}

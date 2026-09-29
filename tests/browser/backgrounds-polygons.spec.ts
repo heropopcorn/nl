@@ -27,7 +27,7 @@ test('season switching preserves editing state, routes and view; missing quality
 });
 
 test('resolution labels use actual dimensions and do not mutate document coordinates', async ({ page }) => {
-  const manifest = JSON.parse(await readFile('apps/director-web/public/assets.json', 'utf8'));
+  const manifest = JSON.parse(await readFile('apps/director-web/.generated/preview-full/assets.json', 'utf8'));
   const png = await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 768; c.height = 512; const ctx = c.getContext('2d')!; ctx.fillStyle = '#475e76'; ctx.fillRect(0, 0, 768, 512); return c.toDataURL().split(',')[1]; });
   manifest.protagonist_village.x2 = manifest.protagonist_village.default;
   manifest.protagonist_village.x4 = { url: '/art/test_small.png', width: 768, height: 512 };
