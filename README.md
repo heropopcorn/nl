@@ -11,6 +11,7 @@
 - 其他作品使用 `npm run work -- --workspace projects/作品名称`。项目 JSON 与素材可一起提交 Git；缓存、工作锁、备份和回收区不提交。详见 [作品目录说明](projects/README.md) 和 [运行、迁移与备份说明](docs/runtime-modes.md)。
 - 本地右下角“本地文件”支持二进制项目包、恢复草稿、容量检查及可恢复清理。跨设备切换前保存、停止服务并推送，另一台先拉取再启动；Git LFS 尚未启用。
 - 视频制作入口：“自定义资源 → 制作序列帧”。本地模式支持保存／重开制作草稿，原视频、选帧顺序、处理帧及图集均随工作目录同步；不接云存储。详见 [视频制作说明](docs/spritesheet-integration.md)。
+- 顶部“资源确认”：将待审图片／视频／动图放入 `resource-review/inbox/`，启用后临时发布未标记素材，确认记录存 Supabase，bot 用 `npm run review:sync` 拉取结果。需先配置数据库迁移和 Vercel 环境变量，默认不启用；详见 [资源确认说明](docs/resource-review.md)。
 
 ## 这是什么
 

@@ -24,6 +24,10 @@ test('static preview works without workspace APIs and hides excluded default res
     await expect(page.getByRole('button',{name:/沙漠/})).toHaveCount(0);
     assert.equal(apis.length,0);
     assert.equal((await context.request.get(base+'/api/workspace')).status(),404);
+    assert.equal((await context.request.get(base+'/api/resource-review')).status(),503);
+    const range=await context.request.get(base+'/art/player.png',{headers:{Range:'bytes=0-7'}});
+    assert.equal(range.status(),206);assert.equal((await range.body()).toString('hex'),'89504e470d0a1a0a');
+    assert.equal((await context.request.get(base+'/art/player.png',{headers:{Range:'bytes=999999999-'}})).status(),416);
     assert.equal((await context.request.get(base+'/art/nl_ground_desert_dunes.png')).status(),404);
   } finally {await browser?.close(); const done=new Promise(r=>child.once('exit',r));child.kill('SIGTERM');await done;}
 });

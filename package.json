@@ -7,6 +7,7 @@
     "dev": "npm run prepare:assets && vite --config apps/director-web/vite.config.ts",
     "build": "npm run prepare:assets && tsc --noEmit && vite build --config apps/director-web/vite.config.ts && npm run prepare:server",
     "prepare:server": "node apps/director-web/scripts/build-local-core.mjs",
+    "review:sync": "node tools/resource-review/sync.mjs",
     "work": "node apps/director-web/scripts/work.mjs",
     "start": "node apps/director-web/server.mjs",
     "pretest": "node apps/director-web/scripts/prepare-assets.mjs --full",
