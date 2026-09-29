@@ -10,10 +10,10 @@ OUT_DIR="${OUT_DIR:-$ROOT/export/web}"
 
 cd "$REPO"
 npm ci --no-audit --no-fund
-npm run build
+NL_MODE=preview NL_ASSET_PROFILE=demo npm run build
 
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
-cp -R "$REPO/apps/director-web/dist/." "$OUT_DIR/"
+cp -R "$REPO/apps/director-web/dist-preview/." "$OUT_DIR/"
 echo "Published web director to $OUT_DIR:"
 ls -la "$OUT_DIR"

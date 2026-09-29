@@ -1,3 +1,4 @@
+import { isLocalWork } from './runtime';
 import { useState } from 'react';
 import type { Project } from '../../../packages/core';
 import { listProjectBackups, saveProject, type ProjectBackup } from './storage';
@@ -11,5 +12,5 @@ export function BackupPanel({ project, disabled, restore, notify }: { project: P
     setBusy(true);
     try { await saveProject(project, true); restore(structuredClone(b.project)); setBackups(null); notify('备份已恢复，恢复前项目已备份'); } catch (e) { notify(`恢复失败：${e}`); } finally { setBusy(false); }
   }
-  return <><button disabled={disabled} onClick={open}>本机备份</button>{backups && <section role="dialog" aria-label="本机备份管理" className="legacy-import-dialog"><h2>本机历史备份</h2><p>自动备份至少间隔一分钟，最多保留五份，并受容量限制。清理浏览器数据会删除备份，请定期导出项目。</p><button disabled={busy || disabled} onClick={checkpoint}>创建备份</button>{backups.map(b => <div key={b.id}><span>{new Date(b.time).toLocaleString()} · {b.project.name}</span><button disabled={busy || disabled} aria-label={`恢复备份 ${b.id}`} onClick={() => recover(b)}>恢复</button></div>)}{!backups.length && <p>暂无历史备份。</p>}<button disabled={busy} onClick={() => setBackups(null)}>关闭备份</button></section>}</>;
+  return <><button disabled={disabled} onClick={open}>本机备份</button>{backups && <section role="dialog" aria-label="本机备份管理" className="legacy-import-dialog"><h2>本机历史备份</h2><p>{isLocalWork() ? '备份保存在项目文件夹的 backups 中；显示最近 50 份，未自动删除旧备份。请定期复制整个项目文件夹到其他磁盘。' : '自动备份至少间隔一分钟，最多保留五份，并受容量限制。清理浏览器数据会删除备份，请定期导出项目。'}</p><button disabled={busy || disabled} onClick={checkpoint}>创建备份</button>{backups.map(b => <div key={b.id}><span>{new Date(b.time).toLocaleString()} · {b.project.name}</span><button disabled={busy || disabled} aria-label={`恢复备份 ${b.id}`} onClick={() => recover(b)}>恢复</button></div>)}{!backups.length && <p>暂无历史备份。</p>}<button disabled={busy} onClick={() => setBackups(null)}>关闭备份</button></section>}</>;
 }

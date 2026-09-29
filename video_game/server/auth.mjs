@@ -51,6 +51,9 @@ export function createAuth({ secret, username = 'admin', passwordHash = defaultH
       const expires = String(now() + lifetime * 1000);
       return redirect('/index.html', cookie(`${expires}.${sign(expires)}`, lifetime));
     }
-    return loggedIn ? null : redirect('/login');
+    if (loggedIn) return null;
+    // Fetch must never mistake the HTML login page for media or project JSON.
+    if (url.pathname.startsWith('/api/')) return new Response(JSON.stringify({error:'登录已过期，请重新登录后重试', code:'AUTH_REQUIRED'}), {status:401, headers:{...headers, 'Content-Type':'application/json'}});
+    return redirect('/login');
   };
 }
