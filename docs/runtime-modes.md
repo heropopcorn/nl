@@ -2,6 +2,8 @@
 
 一套编辑器，两种存储实现。无需数据库或 OSS；完整默认素材暂时继续提交 GitHub。
 
+可选的“资源确认”模块例外：仅人工确认记录使用 Supabase，临时素材仍随静态发布。启用后增加 `/api/resource-review` Vercel Function，不开放本地工作区服务；本地制作仍不依赖云端。参见 [配置说明](resource-review.md)。
+
 ## 在线预览／功能开发
 
 ```sh

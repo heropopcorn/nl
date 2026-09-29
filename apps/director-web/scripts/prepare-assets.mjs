@@ -1,5 +1,7 @@
 import { mkdir, copyFile, readFile, writeFile, readdir, unlink } from 'node:fs/promises';
 import { buildPaths } from '../build-paths.mjs';
+import { prepareReview } from '../../../tools/resource-review/library.mjs';
+import { fileURLToPath } from 'node:url';
 const root = new URL('../../../', import.meta.url);
 const profile = process.argv.includes('--full') ? 'full' : process.env.NL_ASSET_PROFILE || 'demo';
 const mode = process.env.NL_MODE || 'preview';
@@ -46,3 +48,4 @@ for (const file of (await readdir(new URL('video_game/art/sliced/', root))).filt
 }
 await writeFile(new URL('../runtime.json', output), JSON.stringify({ mode, profile, available }, null, 2));
 console.log(`资源配置：${mode}/${profile}，发布 ${available.length} 张图片`);
+await prepareReview({repo:fileURLToPath(root), publicDir:fileURLToPath(new URL('../',output))});
