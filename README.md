@@ -2,6 +2,8 @@
 
 公开接力仓库：不同 AI / 开发者应基于本仓继续，不要只从聊天上下文猜状态。
 
+当前状态总览：[`docs/project-overview.md`](docs/project-overview.md)
+
 仓库：https://github.com/heropopcorn/nl
 
 ## 网页导演台：两种运行模式
