@@ -7,8 +7,22 @@ import { sample } from '../../packages/core';
 import { createAuth } from '../../video_game/server/auth.mjs';
 
 test.use({ hasTouch: true });
-const nav = (page: Page) => page.getByRole('navigation', { name: '工作区切换' });
-async function pane(page: Page, name: string) { await nav(page).getByRole('button', { name, exact: true }).click(); }
+const nav = (page: Page) => page.getByRole('navigation', { name: '工作区切换', includeHidden: true });
+async function pane(page: Page, name: string) {
+  const button = nav(page).getByRole('button', { name, exact: true, includeHidden: true });
+  if (await button.getAttribute('aria-pressed') === 'true') return;
+  const active = page.locator('#pane-left.mobile-drawer[data-open=true], #pane-inspector.mobile-drawer[data-open=true], #pane-scenes.mobile-drawer[data-open=true]');
+  if (await active.count()) await active.locator('> .mobile-drawer-heading button').click();
+  await button.click();
+}
+async function sameCanvas(page: Page, baseline: NonNullable<Awaited<ReturnType<Locator['boundingBox']>>>) {
+  const canvas = page.getByLabel('影棚预览');
+  await expect(canvas).toBeVisible();
+  await expect.poll(async () => {
+    const box = await canvas.boundingBox();
+    return box ? Math.max(...(['x', 'y', 'width', 'height'] as const).map(key => Math.abs(box[key] - baseline[key]))) : Infinity;
+  }).toBeLessThanOrEqual(1);
+}
 async function start(page: Page, width = 390, height = 844) {
   await page.setViewportSize({ width, height });
   await page.goto('/');
@@ -40,24 +54,37 @@ for (const size of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { 
     await start(page, size.width, size.height);
     await expect(nav(page)).toBeVisible();
     await fits(page, page.locator('main'));
+    const canvasBox = (await page.getByLabel('影棚预览').boundingBox())!;
     await page.screenshot({ path: test.info().outputPath('canvas.png') });
-    await pane(page, '元素'); await fits(page, page.locator('.left'));
+    await pane(page, '元素'); await fits(page, page.locator('#pane-left'));
+    await expect(page.locator('#pane-left')).toHaveAttribute('data-side', 'left');
+    await expect(page.locator('#pane-left')).toHaveAttribute('data-open', 'true');
+    await sameCanvas(page, canvasBox);
+    await expect(page.locator('#pane-left .hierarchy')).toBeVisible();
+    await expect(page.locator('#pane-left .resource-pane')).toBeVisible();
     await page.getByRole('button', { name: /主角（占位贴图）/ }).click();
     await expect(nav(page).getByRole('button', { name: '画布', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await pane(page, '属性'); await fits(page, page.locator('.right'));
+    await pane(page, '属性'); await fits(page, page.locator('#pane-inspector'));
+    await expect(page.locator('#pane-inspector')).toHaveAttribute('data-side', 'right');
+    await sameCanvas(page, canvasBox);
     await page.getByLabel('元素名称', { exact: true }).fill('手机端角色');
     await page.getByLabel('时段', { exact: true }).selectOption('night');
     await page.getByLabel('月光强度').fill('0.5');
-    await pane(page, '资源'); await fits(page, page.locator('.left'));
+    await pane(page, '资源'); await fits(page, page.locator('#pane-left'));
+    await sameCanvas(page, canvasBox);
     await page.getByLabel('搜索资源').fill('学校');
     await expect(page.locator('.asset img')).toHaveCount(1);
     await expect(page.locator('.asset img')).toHaveJSProperty('naturalWidth', 1536);
     await page.screenshot({ path: test.info().outputPath('resources.png') });
-    await pane(page, '场景'); await fits(page, page.locator('.scene-browser'));
+    await pane(page, '场景'); await fits(page, page.locator('#pane-scenes'));
+    await expect(page.locator('#pane-scenes')).toHaveAttribute('data-side', 'bottom');
+    await sameCanvas(page, canvasBox);
     await page.locator('.tracks').scrollIntoViewIfNeeded();
     await expect(page.getByRole('button', { name: '03 五行 · 相生' })).toBeVisible();
     await page.setViewportSize({ width: 1440, height: 960 });
     await expect(nav(page)).toBeHidden();
+    await expect(page.locator('.mobile-drawer-backdrop')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '关闭章节与场景', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: '资源确认', exact: true })).toBeInViewport();
     await expect(page.getByRole('button', { name: '撤销', exact: true })).toBeInViewport();
     await expect(page.getByRole('link', { name: '退出', exact: true })).toBeInViewport();
@@ -84,8 +111,12 @@ test('resource preview, upload and sprite workflow are usable on a narrow phone'
   await page.getByRole('button', { name: '更多资源…', exact: true }).click();
   const resources = page.getByRole('dialog', { name: '更多资源', exact: true });
   await fits(page, resources);
+  await expect(resources.locator('#resource-list-drawer')).toHaveAttribute('data-side', 'left');
+  await expect(resources.locator('#resource-list-drawer')).toHaveAttribute('data-open', 'true');
   await resources.getByLabel('搜索资源').fill('村庄学校');
   await resources.getByRole('button', { name: '村庄学校', exact: true }).click();
+  await expect(resources.locator('#resource-list-drawer')).toHaveAttribute('data-open', 'false');
+  await expect(resources.locator('#resource-list-drawer')).toBeHidden();
   await expect(resources.getByRole('img', { name: '村庄学校', exact: true })).toBeInViewport();
   await expect(resources.getByRole('button', { name: '应用到场景', exact: true })).toBeInViewport();
   page.on('dialog', d => d.accept());
@@ -105,22 +136,32 @@ test('resource preview, upload and sprite workflow are usable on a narrow phone'
   await page.getByRole('button', { name: '制作序列帧', exact: true }).click();
   const sprite = page.getByRole('dialog', { name: '序列帧制作', exact: true });
   await fits(page, sprite);
+  await expect(sprite.locator('#sprite-settings-drawer')).toHaveAttribute('data-side', 'left');
+  await expect(sprite.locator('#sprite-settings-drawer')).toHaveAttribute('data-open', 'true');
   const file = test.info().outputPath('phone.webm');
   execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=96x64:rate=4:duration=1', '-c:v', 'libvpx', file]);
   await sprite.getByLabel('上传视频').setInputFiles(file);
   await sprite.getByLabel('抽帧 FPS', { exact: true }).fill('4');
   await sprite.getByRole('button', { name: '开始抽帧', exact: true }).click();
   await expect(sprite.locator('.sprite-frames article')).toHaveCount(4);
-  await sprite.getByRole('button', { name: '预览 / 帧排序', exact: true }).click();
+  await sprite.getByRole('button', { name: '关闭制作与保存', exact: true }).click();
+  await expect(sprite.locator('#sprite-settings-drawer')).toBeHidden();
+  await sprite.getByRole('button', { name: '帧排序', exact: true }).click();
+  await expect(sprite.locator('#sprite-frames-drawer')).toHaveAttribute('data-side', 'bottom');
+  await expect(sprite.locator('#sprite-frames-drawer')).toHaveAttribute('data-open', 'true');
   await fits(page, sprite.locator('.sprite-workspace'));
   await sprite.locator('.sprite-frames article').nth(1).getByRole('button', { name: '前移', exact: true }).click();
   await expect(sprite.locator('.sprite-frames article').first()).toContainText('0.25s');
   await page.screenshot({ path: test.info().outputPath('sprite-frames.png') });
+  await sprite.getByRole('button', { name: '关闭帧排序', exact: true }).click();
+  await expect(sprite.locator('#sprite-frames-drawer')).toBeHidden();
   await sprite.getByRole('button', { name: '制作 / 保存', exact: true }).click();
   await sprite.getByRole('button', { name: '合成序列帧', exact: true }).click();
   await expect(sprite.getByRole('button', { name: '保存到自定义分类', exact: true })).toBeEnabled();
   await sprite.getByRole('button', { name: '保存到自定义分类', exact: true }).click();
   await expect(sprite.getByLabel('序列帧状态')).toContainText('已保存到自定义分类');
+  await sprite.getByRole('button', { name: '关闭制作与保存', exact: true }).click();
+  await expect(sprite.locator('#sprite-settings-drawer')).toBeHidden();
   await sprite.getByLabel('关闭资源浏览器').click();
   await expect(page.getByRole('button', { name: 'phone', exact: true })).toBeVisible();
 });
@@ -163,6 +204,61 @@ test('touch lasso survives pinch and pane changes; cancelled touch edits are not
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   expect(await page.locator('.canvas-stack').getAttribute('style')).not.toBe(transform);
   expect((await stored(page)).shots[0].effects[0].regions).toHaveLength(2);
+});
+
+test('directional drawers share the left contents and close without changing canvas view or a lasso draft', async ({ page }) => {
+  await start(page);
+  await pane(page, '元素'); await page.getByLabel('添加环境元素').selectOption('fog');
+  await pane(page, '属性'); await page.getByRole('button', { name: '套索添加区域', exact: true }).click();
+  await page.getByLabel('视图', { exact: true }).selectOption('1.5');
+  for (const [x, y] of [[600, 450], [850, 650]]) {
+    const p = await logical(page, x, y); await page.mouse.click(p.x, p.y);
+  }
+  const draft = page.getByLabel('多边形草稿').locator('circle');
+  await expect(draft).toHaveCount(2);
+  const canvasBox = (await page.getByLabel('影棚预览').boundingBox())!;
+  const transform = await page.locator('.canvas-stack').getAttribute('style');
+  const documentBefore = await stored(page);
+
+  await pane(page, '元素');
+  const left = page.locator('#pane-left');
+  await expect(left).toHaveAttribute('data-side', 'left');
+  await expect(left.locator('.hierarchy')).toBeVisible();
+  await expect(left.locator('.resource-pane')).toBeVisible();
+  await left.getByRole('button', { name: '资源列表', exact: true }).click();
+  await expect(left.getByLabel('搜索资源')).toBeInViewport();
+  await left.getByRole('button', { name: '元素列表', exact: true }).click();
+  await expect(left.getByRole('button', { name: /主角（占位贴图）/ })).toBeInViewport();
+  await sameCanvas(page, canvasBox);
+  await expect(draft).toHaveCount(2);
+  await left.getByRole('button', { name: '关闭元素与资源', exact: true }).click();
+  await expect(left).toHaveAttribute('data-open', 'false');
+  await expect(left).toBeHidden();
+
+  await pane(page, '属性');
+  const right = page.locator('#pane-inspector');
+  await expect(right).toHaveAttribute('data-side', 'right');
+  await sameCanvas(page, canvasBox);
+  const backdrop = page.getByRole('button', { name: '收起属性', exact: true });
+  const shade = (await backdrop.boundingBox())!, panel = (await right.boundingBox())!;
+  // The backdrop fills the screen behind the panel. Click its exposed left gutter,
+  // not the center which is intentionally covered by the right drawer.
+  expect(panel.x - shade.x).toBeGreaterThan(2);
+  await backdrop.click({ position: { x: (panel.x - shade.x) / 2, y: shade.height / 2 } });
+  await expect(right).toHaveAttribute('data-open', 'false');
+  await expect(right).toBeHidden();
+
+  await pane(page, '场景');
+  await expect(page.locator('#pane-scenes')).toHaveAttribute('data-side', 'bottom');
+  await sameCanvas(page, canvasBox);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#pane-scenes')).toHaveAttribute('data-open', 'false');
+  await expect(page.locator('#pane-scenes')).toBeHidden();
+  await expect(page.locator('.mobile-drawer-backdrop')).toHaveCount(0);
+  await expect(draft).toHaveCount(2);
+  await expect(page.getByRole('button', { name: '多边形套索', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.locator('.canvas-stack').getAttribute('style')).toBe(transform);
+  expect(await stored(page)).toEqual(documentBefore);
 });
 
 test('phone menus expose backups, project import/export, legacy import and 3D inspector', async ({ page }) => {
@@ -210,7 +306,11 @@ test('mobile review list, media preview and confirmation remain accessible', asy
   await page.getByRole('button', { name: '资源确认', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '资源确认', exact: true });
   await fits(page, dialog);
+  await expect(dialog.locator('#review-list-drawer')).toHaveAttribute('data-side', 'left');
+  await expect(dialog.locator('#review-list-drawer')).toHaveAttribute('data-open', 'true');
   await dialog.getByRole('button', { name: '查看 手机确认.png', exact: true }).click();
+  await expect(dialog.locator('#review-list-drawer')).toHaveAttribute('data-open', 'false');
+  await expect(dialog.locator('#review-list-drawer')).toBeHidden();
   await expect(dialog.getByRole('img', { name: '资源大图 手机确认.png' })).toBeInViewport();
   await dialog.getByLabel('确认备注').fill('手机预览正常');
   await dialog.getByRole('button', { name: '标记可用', exact: true }).click();
@@ -271,6 +371,69 @@ test('layout breakpoint uses viewport width, including desktop user agents and l
   await page.setViewportSize({ width: 1023, height: 768 });
   await expect(nav(page)).toBeVisible();
   await expect(page.getByLabel('搜索资源')).toHaveValue('学校');
+});
+
+test('drawer focus, nested Escape and phone-desktop-phone resizing never leave controls inert', async ({ page }) => {
+  test.setTimeout(45000);
+  await start(page);
+  const inspector = page.locator('#pane-inspector');
+  const propertyButton = nav(page).getByRole('button', { name: '属性', exact: true });
+  await propertyButton.click();
+  const closeInspector = inspector.getByRole('button', { name: '关闭属性', exact: true });
+  await expect(closeInspector).toBeFocused();
+  await expect(page.locator('main')).toHaveJSProperty('inert', true);
+  // Shift+Tab from the first control wraps inside the drawer, not into the canvas.
+  await page.keyboard.press('Shift+Tab');
+  await expect(inspector.getByRole('button', { name: '保存当前帧 PNG', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab'); await expect(closeInspector).toBeFocused();
+  await page.keyboard.press('Tab'); await expect(inspector.getByLabel('布景名称', { exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(inspector).toBeHidden();
+  await expect(propertyButton).toBeFocused();
+  for (const target of [page.locator('.app-header'), page.locator('main'), nav(page)]) await expect(target).toHaveJSProperty('inert', false);
+
+  await pane(page, '资源');
+  await page.getByRole('button', { name: '更多资源…', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '更多资源', exact: true });
+  const list = dialog.locator('#resource-list-drawer');
+  await expect(list).toHaveAttribute('data-open', 'true');
+  await page.keyboard.press('Escape');
+  await expect(list).toBeHidden();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: '资源列表', exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  // The native dialog closes independently of the main editor's left drawer.
+  await expect(page.locator('#pane-left')).toHaveAttribute('data-open', 'true');
+
+  await page.getByRole('button', { name: '更多资源…', exact: true }).click();
+  await list.getByLabel('搜索资源').fill('学校');
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await expect(nav(page)).toBeHidden();
+  await expect(dialog.locator('.resource-drawer-layout .resource-preview')).toHaveJSProperty('inert', false);
+  await dialog.getByLabel('搜索资源').fill('村庄学校');
+  await dialog.getByRole('button', { name: '村庄学校', exact: true }).click();
+  await expect(dialog.getByRole('img', { name: '村庄学校', exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(list).toBeHidden();
+  await expect(dialog.locator('.resource-dialog-heading')).toHaveJSProperty('inert', false);
+  await expect(dialog.locator('.resource-drawer-layout .resource-preview')).toHaveJSProperty('inert', false);
+  page.once('dialog', d => d.accept());
+  await dialog.getByRole('button', { name: '应用到场景', exact: true }).click();
+  await expect.poll(async () => (await stored(page)).shots[0].background).toBe('village_school');
+  await dialog.getByRole('button', { name: '资源列表', exact: true }).click();
+  await list.getByLabel('搜索资源').fill('村庄');
+  await list.getByRole('button', { name: '村庄', exact: true }).click();
+  await expect(list).toBeHidden();
+  await expect(dialog.getByRole('img', { name: '村庄', exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: '关闭资源浏览器', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await propertyButton.click();
+  await inspector.getByLabel('布景名称', { exact: true }).fill('切换后仍可编辑');
+  await closeInspector.click();
+  await expect(inspector).toBeHidden();
+  expect((await stored(page)).shots[0].name).toBe('切换后仍可编辑');
+  for (const target of [page.locator('.app-header'), page.locator('main'), nav(page)]) await expect(target).toHaveJSProperty('inert', false);
 });
 
 test('login, invalid credentials and logged-in landing fit portrait and landscape', async ({ page }) => {
