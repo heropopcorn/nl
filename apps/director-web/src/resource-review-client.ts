@@ -3,8 +3,11 @@ const id=z.string().regex(/^[a-f0-9]{64}$/);
 export const reviewStatus=z.enum(['pending','usable','unusable']);
 const itemSchema=z.object({id,name:z.string().min(1).max(255),kind:z.enum(['image','animation','video']),mime:z.string(),bytes:z.number().int().positive(),url:z.string()})
   .refine(a=>new RegExp(`^/resource-review/media/${a.id}\\.(png|apng|jpg|jpeg|gif|webp|mp4|webm)$`).test(a.url),'预览资源地址无效');
-const manifestSchema=z.object({version:z.literal(1),enabled:z.boolean(),namespace:z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/).nullable(),generatedAt:z.string(),items:z.array(itemSchema).max(500)})
-  .refine(m=>(!m.enabled || !!m.namespace) && new Set(m.items.map(a=>a.id)).size===m.items.length,'确认清单无效');
+const count=z.number().int().nonnegative();
+const scanSchema=z.object({source:z.literal('resource-review/inbox/'),files:count,uniqueAssets:count,images:count,animations:count,videos:count,pending:count,reviewed:count})
+  .refine(s=>s.files>=s.uniqueAssets && s.images+s.animations+s.videos===s.uniqueAssets && s.pending+s.reviewed===s.uniqueAssets,'确认批次扫描统计无效');
+const manifestSchema=z.object({version:z.literal(1),enabled:z.boolean(),namespace:z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/).nullable(),generatedAt:z.string(),items:z.array(itemSchema).max(500),scan:scanSchema.optional()})
+  .refine(m=>(!m.enabled || !!m.namespace) && new Set(m.items.map(a=>a.id)).size===m.items.length && (!m.scan || (m.enabled && m.scan.pending===m.items.length)),'确认清单无效');
 const rowSchema=z.object({asset_id:id,status:reviewStatus,note:z.string().max(2000),revision:z.number().int().nonnegative(),updated_at:z.string(),reviewed_by:z.string().nullable().optional()});
 export type ReviewItem=z.infer<typeof itemSchema>;
 export type ReviewRow=z.infer<typeof rowSchema>;

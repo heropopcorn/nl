@@ -78,8 +78,20 @@ export async function prepareReview({repo,publicDir,env=process.env,store}) {
       await writeFile(path.join(output,'media',name),bytes,{flag:'wx'});
       const {paths,extension,...item}=asset;items.push({...item,url:'/resource-review/media/'+name});
     }
-    manifest={...manifest,enabled:true,namespace:store.namespace,items};
-    console.log(`资源确认：发布 ${pending.length} 项未确认素材，排除 ${assets.length-pending.length} 项已确认素材`);
+    const scan={
+      source:'resource-review/inbox/',
+      files:assets.reduce((sum,asset)=>sum+asset.paths.length,0),
+      uniqueAssets:assets.length,
+      images:assets.filter(asset=>asset.kind==='image').length,
+      animations:assets.filter(asset=>asset.kind==='animation').length,
+      videos:assets.filter(asset=>asset.kind==='video').length,
+      pending:pending.length,
+      reviewed:assets.length-pending.length,
+    };
+    manifest={...manifest,enabled:true,namespace:store.namespace,items,scan};
+    if(!scan.uniqueAssets)console.log('资源确认：resource-review/inbox/ 中没有可发布的图片、动图或视频；其他目录的素材不会自动加入待确认批次');
+    else if(!scan.pending)console.log(`资源确认：本次扫描 ${scan.files} 个文件、${scan.uniqueAssets} 项不同素材，已全部标记；不发布素材，原件保留`);
+    else console.log(`资源确认：扫描 ${scan.files} 个文件、${scan.uniqueAssets} 项不同素材；发布 ${scan.pending} 项未确认素材，排除 ${scan.reviewed} 项已确认素材`);
   }
   await writeFile(path.join(output,'manifest.json'),JSON.stringify(manifest,null,2));
   return manifest;

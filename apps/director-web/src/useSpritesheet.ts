@@ -19,9 +19,25 @@ export function useSpritesheet() {
   lifetime.current.frames = frames; lifetime.current.packed = packed;
   useEffect(() => { const state = lifetime.current; return () => { state.alive = false; state.abort.abort(); revokeFrameUrls(state.frames); if (state.packed) URL.revokeObjectURL(state.packed.url); }; }, []);
   const active = frames.filter(f => f.enabled);
+  const previewFrame = playing ? active[index % Math.max(1, active.length)] : frames.find(f => f.id === selected) ?? active[0] ?? frames[0];
   useEffect(() => { if (!playing || active.length < 2) return; const timer = setInterval(() => setIndex(i => (i + 1) % active.length), 1000 / Math.max(0.1, fps)); return () => clearInterval(timer); }, [playing, active.length, fps]);
+  function selectFrame(id: string) {
+    if (!frames.some(frame => frame.id === id)) return;
+    setSelected(id); setPlaying(false);
+    const activeIndex = active.findIndex(frame => frame.id === id);
+    if (activeIndex >= 0) setIndex(activeIndex);
+  }
+  function togglePlayback() {
+    if (playing) { if (previewFrame) setSelected(previewFrame.id); setPlaying(false); }
+    else if (active.length >= 2) { setIndex(Math.max(0, active.findIndex(frame => frame.id === selected))); setPlaying(true); }
+  }
+  function stepFrame(delta: number) {
+    if (!frames.length) return;
+    const current = frames.findIndex(frame => frame.id === previewFrame?.id);
+    selectFrame(frames[(Math.max(0, current) + delta + frames.length) % frames.length].id);
+  }
   function invalidate() { if (packed) URL.revokeObjectURL(packed.url); setPacked(null); }
-  function changeFrames(next: SpriteFrame[]) { invalidate(); setFrames(next); setIndex(0); }
+  function changeFrames(next: SpriteFrame[]) { invalidate(); setFrames(next); setIndex(0); setPlaying(false); }
   async function run(fn: () => Promise<void>) {
     if (running.current) return;
     running.current = true; setBusy(true); setPlaying(false); setStatus('正在处理…');
@@ -62,6 +78,7 @@ export function useSpritesheet() {
     invalidate(); setPacked({ blob, layout, json: spritesheetJson(layout), url: URL.createObjectURL(blob) });
   });
   return { name, setName, video, chooseVideo, restore, frames, selected, setSelected, active, extract, setExtract, pack, setPack: (value: typeof pack) => { invalidate(); setPack(value); }, threshold, setThreshold, crop, setCrop, busy, status, playing, setPlaying, index, setIndex, fps, setFps, packed, extractNow, cutout, packNow,
+    previewFrame, selectFrame, togglePlayback, stepFrame,
     toggle: (id: string, enabled: boolean) => changeFrames(frames.map(f => f.id === id ? { ...f, enabled } : f)),
     enableAll: (enabled: boolean) => changeFrames(frames.map(f => ({ ...f, enabled }))),
     reorder: (from: number, to: number) => changeFrames(moveItem(frames, from, to)),

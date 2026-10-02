@@ -30,22 +30,59 @@ test('publish only pending content, never reset approvals, and changed bytes bec
     await writeFile(path.join(inbox,'loop.gif'),Buffer.from('GIF89a123456'));
     const scanned=await scanReviewInbox(repo);assert.equal(scanned.length,3);assert.equal(scanned.find(a=>a.mime==='image/png').paths.length,2);
     const first=await prepareReview({repo,publicDir,env,store});assert.equal(first.items.length,3);assert.equal(first.namespace,'nl-test');
-    assert.ok(!JSON.stringify(first).includes('inbox/'));assert.ok(!JSON.stringify(first).includes('secret'));
+    assert.deepEqual(first.scan,{source:'resource-review/inbox/',files:4,uniqueAssets:3,images:1,animations:1,videos:1,pending:3,reviewed:0});
+    assert.ok(!JSON.stringify(first.items).includes('inbox/'));assert.ok(!JSON.stringify(first).includes(repo));assert.ok(!JSON.stringify(first).includes('secret'));
     for(const item of first.items)assert.ok((await readFile(path.join(publicDir,item.url))).length);
     const id=createHash('sha256').update(png).digest('hex');store.rows.get(id).status='usable';
     const rejected=first.items.find(a=>a.kind==='video');store.rows.get(rejected.id).status='unusable';
     const second=await prepareReview({repo,publicDir,env,store});assert.equal(second.items.length,1);assert.equal(second.items[0].kind,'animation');
+    assert.deepEqual(second.scan,{...first.scan,pending:1,reviewed:2});
     assert.equal((await readdir(path.join(publicDir,'resource-review/media'))).length,1);
     assert.equal(store.rows.get(id).status,'usable');
     await writeFile(path.join(inbox,'same-name.png'),Buffer.concat([png,Buffer.from('new content')]));
     const third=await prepareReview({repo,publicDir,env,store});assert.equal(third.items.length,2);assert.ok(third.items.some(a=>a.name==='same-name.png'&&a.id!==id));
+    assert.deepEqual(third.scan,{...first.scan,uniqueAssets:4,images:2,pending:2,reviewed:2});
     const original=await readFile(path.join(inbox,'duplicate.png'));assert.deepEqual(original,png);
     await assert.rejects(prepareReview({repo,publicDir,env,store:{...store,list:async()=>[]}}),/状态不完整/);
     await assert.rejects(readFile(path.join(publicDir,'resource-review/manifest.json')));
     const disabled=await prepareReview({repo,publicDir,env:{},store:{register:()=>{throw Error('must not contact cloud');}}});assert.equal(disabled.enabled,false);
+    assert.equal(Object.hasOwn(disabled,'scan'),false);
     assert.deepEqual(await readdir(path.join(publicDir,'resource-review/media')),[]);
     await symlink(path.join(inbox,'duplicate.png'),path.join(inbox,'linked.png'));
     await assert.rejects(scanReviewInbox(repo),/符号链接/);
+  } finally {await rm(repo,{recursive:true,force:true});}
+});
+test('scan diagnostics distinguish an empty inbox from an entirely reviewed batch and ignore other media directories',async()=>{
+  const repo=await mkdtemp(path.join(os.tmpdir(),'nl-review-diagnostics-')),publicDir=path.join(repo,'apps/director-web/.generated/preview-demo');
+  const inbox=path.join(repo,'resource-review/inbox'),store=memoryStore();
+  try {
+    await mkdir(path.join(repo,'assets'),{recursive:true});await writeFile(path.join(repo,'assets','outside.png'),png);
+    const empty=await prepareReview({repo,publicDir,env,store});
+    assert.deepEqual(empty.scan,{source:'resource-review/inbox/',files:0,uniqueAssets:0,images:0,animations:0,videos:0,pending:0,reviewed:0});
+    assert.equal(empty.enabled,true);assert.deepEqual(empty.items,[]);assert.equal(store.rows.size,0);
+    await mkdir(path.join(inbox,'nested'),{recursive:true});
+    await writeFile(path.join(inbox,'.gitkeep'),'');await writeFile(path.join(inbox,'README.txt'),'not a supported media file');
+    await writeFile(path.join(inbox,'nested','inside.png'),png);await writeFile(path.join(inbox,'copy.png'),png);
+    await store.register(await scanReviewInbox(repo));for(const row of store.rows.values())row.status='usable';
+    const reviewed=await prepareReview({repo,publicDir,env,store});
+    assert.deepEqual(reviewed.scan,{...empty.scan,files:2,uniqueAssets:1,images:1,reviewed:1});
+    assert.deepEqual(reviewed.items,[]);assert.deepEqual(await readdir(path.join(publicDir,'resource-review/media')),[]);
+    assert.deepEqual(JSON.parse(await readFile(path.join(publicDir,'resource-review/manifest.json'),'utf8')),reviewed);
+    assert.ok(!JSON.stringify(reviewed).includes('outside.png'));assert.ok(!JSON.stringify(reviewed).includes('inside.png'));assert.ok(!JSON.stringify(reviewed).includes(repo));
+    assert.deepEqual(await readFile(path.join(inbox,'nested','inside.png')),png);assert.deepEqual(await readFile(path.join(repo,'assets','outside.png')),png);
+  } finally {await rm(repo,{recursive:true,force:true});}
+});
+test('disabled review does not scan the inbox or expose scan diagnostics',async()=>{
+  const repo=await mkdtemp(path.join(os.tmpdir(),'nl-review-disabled-')),publicDir=path.join(repo,'apps/director-web/.generated/preview-demo');
+  const inbox=path.join(repo,'resource-review/inbox');
+  try {
+    await mkdir(inbox,{recursive:true});await writeFile(path.join(inbox,'broken.png'),'not a valid image');
+    await assert.rejects(scanReviewInbox(repo),/文件内容与扩展名不匹配/);
+    const store={register(){throw new Error('must not register');},list(){throw new Error('must not query');}};
+    const disabled=await prepareReview({repo,publicDir,env:{},store});
+    assert.equal(disabled.enabled,false);assert.equal(Object.hasOwn(disabled,'scan'),false);assert.deepEqual(disabled.items,[]);
+    assert.deepEqual(JSON.parse(await readFile(path.join(publicDir,'resource-review/manifest.json'),'utf8')),disabled);
+    assert.equal(await readFile(path.join(inbox,'broken.png'),'utf8'),'not a valid image');
   } finally {await rm(repo,{recursive:true,force:true});}
 });
 test('review API enforces cookie auth, read-only bot token, same-origin writes, namespaces and revision conflicts',async()=>{

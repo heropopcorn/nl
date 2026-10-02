@@ -11,4 +11,5 @@
 .review-stage img,.review-stage video{width:100%;height:100%;object-fit:contain}
 .review-detail textarea{width:100%;resize:vertical}.review-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .review-feedback{flex-shrink:0}.review-feedback p{margin:3px 0}.review-feedback [role=alert]{color:#ffb2a9}
+.review-batch-info{flex-shrink:0;color:#aab8ca;font-size:12px;overflow-wrap:anywhere}.review-batch-info summary{cursor:pointer;padding:6px 0}.review-batch-info p{margin:6px 0;line-height:1.5}.review-empty{grid-column:1/-1;line-height:1.7;overflow-wrap:anywhere}
 @media(max-width:800px){.review-body{grid-template-columns:1fr;overflow:auto}.review-grid{max-height:220px}.review-detail{overflow:visible}}
