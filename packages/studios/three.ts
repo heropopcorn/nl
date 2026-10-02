@@ -1,6 +1,7 @@
 import * as pc from 'playcanvas';
 import type { Shot } from '../core';
 import type { MediaAsset } from '../core/media';
+import { PendingLoads } from './pending-loads';
 export class ThreeStudio {
   canvas = Object.assign(document.createElement('canvas'), { width: 1280, height: 720 });
   app = new pc.Application(this.canvas, { graphicsDeviceOptions: { preserveDrawingBuffer: true, antialias: true } });
@@ -9,16 +10,34 @@ export class ThreeStudio {
   materials: pc.StandardMaterial[] = [];
   signature = '';
   models = new Map<string, pc.Asset>();
+  private pending = new PendingLoads();
+  private lifetime = new AbortController();
   isPrepared(shot: Shot, assets: MediaAsset[]) { this.currentAssets = assets; return shot.objects3d.filter(o => o.shape === 'model').every(o => { const a = assets.find(a => a.id === o.assetId); return !!a && this.models.has(a.src); }); }
   currentAssets: MediaAsset[] = [];
   async prepare(shot: Shot, assets: MediaAsset[]) {
+    if (this.lifetime.signal.aborted) throw new Error('影棚已关闭');
     this.currentAssets = assets;
     for (const object of shot.objects3d.filter(o => o.shape === 'model')) {
       const media = assets.find(a => a.id === object.assetId); if (!media) throw new Error(`模型资源缺失：${object.name}`);
       if (!this.models.has(media.src)) {
-        const asset = new pc.Asset(media.name, 'container', { url: media.src, filename: 'model.glb' });
-        await new Promise<void>((resolve, reject) => { asset.ready(() => resolve()); asset.once('error', reject); this.app.assets.add(asset); this.app.assets.load(asset); });
-        this.models.set(media.src, asset); this.signature = '';
+        await this.pending.run(media.src, async () => {
+          if (this.lifetime.signal.aborted) throw new Error('影棚已关闭');
+          const asset = new pc.Asset(media.name, 'container', { url: media.src, filename: 'model.glb' });
+          await new Promise<void>((resolve, reject) => {
+            const cleanup = () => { asset.off('load', ready); asset.off('error', failed); this.lifetime.signal.removeEventListener('abort', cancelled); };
+            const ready = () => { cleanup(); resolve(); };
+            const failed = (error: unknown) => {
+              cleanup(); this.app.assets.remove(asset); asset.unload();
+              reject(error instanceof Error ? error : new Error(`模型加载失败：${media.name}`));
+            };
+            const cancelled = () => failed(new Error('影棚已关闭'));
+            asset.once('load', ready); asset.once('error', failed);
+            this.lifetime.signal.addEventListener('abort', cancelled, { once: true });
+            try { this.app.assets.add(asset); this.app.assets.load(asset); } catch (error) { failed(error); }
+          });
+          if (this.lifetime.signal.aborted) throw new Error('影棚已关闭');
+          this.models.set(media.src, asset); this.signature = '';
+        });
       }
     }
   }
@@ -30,7 +49,10 @@ export class ThreeStudio {
     const light = new pc.Entity('Sun'); light.addComponent('light', { type: 'directional', intensity: 1.5 }); light.setEulerAngles(45, 30, 0); this.app.root.addChild(light);
   }
   render(shot: Shot, frame: number) {
-    const signature = JSON.stringify(shot.objects3d);
+    const signature = JSON.stringify([shot.objects3d, shot.objects3d.map(object => {
+      const media = this.currentAssets.find(asset => asset.id === object.assetId);
+      return media ? this.models.get(media.src)?.id : null;
+    })]);
     if (signature !== this.signature) {
       [...this.world.children].forEach(c => c.destroy()); this.materials.forEach(m => m.destroy()); this.materials = [];
       for (const object of shot.objects3d) {
@@ -50,5 +72,5 @@ export class ThreeStudio {
     const c = shot.camera3d; this.camera.setPosition(c.x, c.y, c.z); this.camera.lookAt(0, c.targetY, 0); this.camera.camera!.fov = c.fov;
     this.app.update(0); this.app.render(); return this.canvas;
   }
-  dispose() { this.app.destroy(); }
+  dispose() { if (this.lifetime.signal.aborted) return; this.lifetime.abort(); this.app.destroy(); }
 }

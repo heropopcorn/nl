@@ -15,6 +15,7 @@ export function useSpritesheet() {
   const [fps, setFps] = useState(12);
   const [packed, setPacked] = useState<null | { blob: Blob; url: string; layout: ReturnType<typeof layoutSpritesheet>; json: ReturnType<typeof spritesheetJson> }>(null);
   const lifetime = useRef({ frames, packed, alive: true, abort: new AbortController() });
+  const running = useRef(false);
   lifetime.current.frames = frames; lifetime.current.packed = packed;
   useEffect(() => { const state = lifetime.current; return () => { state.alive = false; state.abort.abort(); revokeFrameUrls(state.frames); if (state.packed) URL.revokeObjectURL(state.packed.url); }; }, []);
   const active = frames.filter(f => f.enabled);
@@ -22,11 +23,11 @@ export function useSpritesheet() {
   function invalidate() { if (packed) URL.revokeObjectURL(packed.url); setPacked(null); }
   function changeFrames(next: SpriteFrame[]) { invalidate(); setFrames(next); setIndex(0); }
   async function run(fn: () => Promise<void>) {
-    if (busy) return;
-    setBusy(true); setStatus('正在处理…');
+    if (running.current) return;
+    running.current = true; setBusy(true); setPlaying(false); setStatus('正在处理…');
     try { await fn(); if (lifetime.current.alive) setStatus('处理完成'); }
     catch (e) { if (lifetime.current.alive) setStatus(`处理失败：${e instanceof Error ? e.message : String(e)}`); }
-    finally { if (lifetime.current.alive) setBusy(false); }
+    finally { running.current = false; if (lifetime.current.alive) setBusy(false); }
   }
   function chooseVideo(file: File) { setPlaying(false); setVideo(file); setName(file.name.replace(/\.[^.]+$/, '')); revokeFrameUrls(frames); changeFrames([]); setSelected(''); setStatus(''); }
   function restore(work: SpriteWork) {

@@ -5,6 +5,7 @@ import { manifestSchema, resolveBackground, type BackgroundManifest, type Qualit
 import { builtinAssets } from '../core/media';
 import type { ThreeStudio } from './three';
 import { WaterSurface } from './water';
+import { PendingLoads } from './pending-loads';
 export type LivePreview = { environmentFrame: number; effectFrames: Record<string, number>; lightningFrame: number };
 
 export interface Studio {
@@ -62,7 +63,8 @@ class MotionStudio implements Studio {
 export class DirectorRenderer {
   private water?: WaterSurface;
   private three?: ThreeStudio;
-  private pending = new Map<string, Promise<void>>();
+  private disposed = false;
+  private pending = new PendingLoads();
   private constructor(private pixi: Studio, private motion: Studio, private images: Record<string, HTMLImageElement>, public readonly manifest: BackgroundManifest, private textures: Record<string, Awaited<ReturnType<typeof Assets.load>>>) {}
   static async create() {
     const app = new Application();
@@ -72,14 +74,16 @@ export class DirectorRenderer {
       const response = await fetch('/assets.json');
       if (!response.ok) throw new Error('背景清单加载失败');
       const manifest = manifestSchema.parse(await response.json());
-      for (const name of ['protagonist_village', 'village_school']) {
-        const url = manifest[name].default.url; textures[url] = await Assets.load(url);
-      }
       const images: Record<string, HTMLImageElement> = {};
-      for (const name of ['player']) {
-        const img = new Image(); img.src = `/art/${name}.png`; await img.decode(); images[name] = img;
-        images[`/art/${name}.png`] = img;
-      }
+      await Promise.all([
+        ...[...new Set(['protagonist_village', 'village_school'].map(name => manifest[name].default.url))].map(async url => {
+          textures[url] = await Assets.load(url);
+        }),
+        (async () => {
+          const img = new Image(); img.src = '/art/player.png'; await img.decode();
+          images.player = images['/art/player.png'] = img;
+        })(),
+      ]);
       return new DirectorRenderer(new PixiStudio(app, textures), new MotionStudio(), images, manifest, textures);
     } catch (error) { app.destroy(true); throw error; }
   }
@@ -90,19 +94,41 @@ export class DirectorRenderer {
     return shot.studio !== 'pixi' || ((shot.blank || !!this.textures[resolveBackground(this.manifest, shot, quality, project.assets).url]) && actorsReady);
   }
   async prepare(project: Project, frame: number, quality: Quality = 'default') {
+    if (this.disposed) throw new Error('影棚已关闭');
     const { shot } = locate(project, frame);
-    if (shot.studio === 'three') { if (!this.three) { const { ThreeStudio } = await import('./three'); this.three ??= new ThreeStudio(); } await this.three.prepare(shot, project.assets); return; }
-    if (shot.studio !== 'pixi') return;
-    for (const actor of shot.actors.filter(a => a.enabled)) {
-      const media = [...builtinAssets, ...project.assets].find(m => m.id === actor.assetId);
-      if (!media) throw new Error(`缺失资源：${actor.name}`);
-      if (!this.images[media.src]) { const img = new Image(); img.src = media.src; await img.decode(); this.images[media.src] = img; }
+    if (shot.studio === 'three') {
+      if (!this.three) {
+        const { ThreeStudio } = await import('./three');
+        if (this.disposed) throw new Error('影棚已关闭');
+        this.three ??= new ThreeStudio();
+      }
+      await this.three.prepare(shot, project.assets); return;
     }
-    if (shot.blank) return;
-    const asset = resolveBackground(this.manifest, shot, quality, project.assets);
-    if (this.textures[asset.url]) return;
-    if (!this.pending.has(asset.url)) this.pending.set(asset.url, Assets.load(asset.url).then(texture => { this.textures[asset.url] = texture; }).finally(() => this.pending.delete(asset.url)));
-    await this.pending.get(asset.url);
+    if (shot.studio !== 'pixi') return;
+    const mediaAssets = [...builtinAssets, ...project.assets];
+    // Resolve everything before starting async work, so validation errors cannot
+    // leave a partially constructed Promise.all with unobserved rejections.
+    const actors = shot.actors.filter(a => a.enabled).map(actor => {
+      const media = mediaAssets.find(m => m.id === actor.assetId);
+      if (!media) throw new Error(`缺失资源：${actor.name}`);
+      return media;
+    });
+    const background = shot.blank ? undefined : resolveBackground(this.manifest, shot, quality, project.assets);
+    const loads = actors.map(media => {
+      if (this.images[media.src]) return Promise.resolve();
+      return this.pending.run(`image:${media.src}`, async () => {
+        const img = new Image(); img.src = media.src; await img.decode();
+        if (!this.disposed) this.images[media.src] = img;
+      });
+    });
+    if (background && !this.textures[background.url]) {
+      loads.push(this.pending.run(`texture:${background.url}`, async () => {
+        const texture = await Assets.load(background.url);
+        if (!this.disposed) this.textures[background.url] = texture;
+      }));
+    }
+    await Promise.all(loads);
+    if (this.disposed) throw new Error('影棚已关闭');
   }
   render(project: Project, frame: number, output: HTMLCanvasElement, quality: Quality = 'default', live?: LivePreview) {
     const { shot, local } = locate(project, frame);
@@ -120,5 +146,5 @@ export class DirectorRenderer {
       ctx.fillStyle = 'white'; ctx.font = '24px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(caption, 640, 693, 1200);
     }
   }
-  dispose() { this.pixi.dispose(); this.motion.dispose(); this.three?.dispose(); this.water?.dispose(); }
+  dispose() { if (this.disposed) return; this.disposed = true; this.pixi.dispose(); this.motion.dispose(); this.three?.dispose(); this.water?.dispose(); }
 }
