@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent, type PointerEvent, type RefObject } from 'react';
 import { PointerIntent } from './pointer-intent';
+import { RepeatTapIntent, type CanvasTapTarget } from './repeat-tap-intent';
+export type { CanvasTapTarget } from './repeat-tap-intent';
 type Position = { x: number; y: number };
 type View = { zoom: number; pan: Position };
 type Tools = {
@@ -13,7 +15,10 @@ type Tools = {
 export type CanvasNavigationOptions = {
   contextEnabled?: boolean;
   tapContextEnabled?: boolean;
-  onContextMenu?: (point: Position, source: 'context' | 'tap') => void;
+  onContextMenu?: (point: Position, source: 'context' | 'tap' | 'select', tapTarget?: CanvasTapTarget) => void;
+  /** Read before tools.down selects anything. A supplied missing preferredKey
+   * must return null, not fall back to a different region after a document edit. */
+  getTapTarget?: (point: Position, preferredKey?: string) => CanvasTapTarget | null;
   /** Change with scene / active pane / tool, not on every render. */
   scopeKey?: string;
 };
@@ -30,6 +35,7 @@ export function useCanvasNavigation(tools: Tools, canvas: RefObject<HTMLCanvasEl
   const interrupted = useRef(false), rollback = useRef<(() => void) | null>(null);
   const pendingTap = useRef<number | null>(null);
   const intent = useRef(new PointerIntent());
+  const repeatTap = useRef(new RepeatTapIntent());
   const pressScope = useRef(options.scopeKey);
   const contextConsumed = useRef(false), suppressClick = useRef(false), suppressNativeContext = useRef(false);
   const update = (next: View) => { current.current = next; setView(next); };
@@ -37,8 +43,9 @@ export function useCanvasNavigation(tools: Tools, canvas: RefObject<HTMLCanvasEl
   const ownsEvent = (e: { currentTarget: HTMLElement; target: EventTarget }) => e.target instanceof Node && e.currentTarget.contains(e.target);
   const contextAllowed = () => latest.current.options.contextEnabled !== false && !!latest.current.options.onContextMenu;
 
-  function abandon(restoreDraft: boolean, resetPointers = false) {
+  function abandon(restoreDraft: boolean, resetPointers = false, resetRepeat = true) {
     intent.current.cancel();
+    if (resetRepeat) repeatTap.current.reset();
     latest.current.tools.cancel();
     if (restoreDraft) rollback.current?.();
     rollback.current = null; pendingTap.current = null;
@@ -49,11 +56,13 @@ export function useCanvasNavigation(tools: Tools, canvas: RefObject<HTMLCanvasEl
     interrupted.current = true;
   }
 
-  function openContext(point: Position, source: 'context' | 'tap') {
+  function openContext(point: Position, source: 'context' | 'tap' | 'select', tapTarget?: CanvasTapTarget) {
     if (!contextAllowed()) return;
-    abandon(true);
+    // A first tap only selects. Keep its completed-tap identity for the next tap;
+    // opening an actual menu resets the sequence, as do every cancellation below.
+    abandon(true, false, source !== 'select');
     contextConsumed.current = true; suppressClick.current = true; suppressNativeContext.current = true;
-    latest.current.options.onContextMenu?.(point, source);
+    latest.current.options.onContextMenu?.(point, source, tapTarget);
   }
 
   useEffect(() => {
@@ -86,7 +95,7 @@ export function useCanvasNavigation(tools: Tools, canvas: RefObject<HTMLCanvasEl
   function down(e: PointerEvent<HTMLElement>) {
     if (!ownsEvent(e)) return;
     // Right clicks are handled only by contextmenu, never by selection or up().
-    if (e.button !== 0 && e.button !== 1) { intent.current.cancel(); suppressNativeContext.current = false; return; }
+    if (e.button !== 0 && e.button !== 1) { intent.current.cancel(); repeatTap.current.reset(); suppressNativeContext.current = false; return; }
     if (!pointers.current.size) {
       interrupted.current = false; contextConsumed.current = false;
       suppressClick.current = false; suppressNativeContext.current = false;
@@ -98,7 +107,7 @@ export function useCanvasNavigation(tools: Tools, canvas: RefObject<HTMLCanvasEl
       pointers.current.set(e.pointerId, position(e));
       if (contextConsumed.current) return;
       if (pointers.current.size >= 2) {
-        intent.current.cancel();
+        intent.current.cancel(); repeatTap.current.reset();
         // The first finger may have started a drag or placed a lasso point. Undo
         // only that in-progress interaction, never a previously committed edit.
         active.tools.cancel(); rollback.current?.(); rollback.current = null;
@@ -109,10 +118,13 @@ export function useCanvasNavigation(tools: Tools, canvas: RefObject<HTMLCanvasEl
       if (interrupted.current) return;
     }
     if (e.button === 1 || (active.panMode && e.button === 0)) {
-      intent.current.cancel();
+      intent.current.cancel(); repeatTap.current.reset();
       e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId);
       panPointer.current = { id: e.pointerId, point: position(e) }; return;
     }
+    if (e.pointerType === 'touch' && active.options.tapContextEnabled && contextAllowed() && active.options.getTapTarget) {
+      repeatTap.current.begin(active.options.getTapTarget(position(e)));
+    } else repeatTap.current.reset();
     rollback.current = active.tools.checkpoint();
     const scope = active.options.scopeKey;
     intent.current.begin(e.pointerId, position(e), e.pointerType === 'touch' && contextAllowed() ? point => {
@@ -127,6 +139,7 @@ export function useCanvasNavigation(tools: Tools, canvas: RefObject<HTMLCanvasEl
     intent.current.move(e.pointerId, position(e));
     const bounds = e.currentTarget.getBoundingClientRect();
     if (e.clientX < bounds.left || e.clientX > bounds.right || e.clientY < bounds.top || e.clientY > bounds.bottom) intent.current.leave();
+    if (intent.current.current?.moved) repeatTap.current.reset();
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, position(e));
     if (gesture.current && pointers.current.size >= 2) {
       const next = measure(e), base = gesture.current, zoom = clampZoom(base.view.zoom * next.distance / base.distance), ratio = zoom / base.view.zoom;
@@ -147,8 +160,17 @@ export function useCanvasNavigation(tools: Tools, canvas: RefObject<HTMLCanvasEl
     if (cancelled || scopeChanged) abandon(!scopeChanged);
     else if (!contextConsumed.current && !interrupted.current && !panPointer.current) {
       const tap = e.pointerType === 'touch' && latest.current.options.tapContextEnabled && !latest.current.panMode && press && !press.moved && !press.held && contextAllowed();
-      if (tap) openContext(position(e), 'tap');
+      if (tap && latest.current.options.getTapTarget) {
+        const candidate = repeatTap.current.candidate;
+        // Re-resolve the captured identity, not the pointer-down selection now
+        // exposed by React. Overlapping regions may have changed that selection.
+        const currentTarget = candidate ? latest.current.options.getTapTarget(position(e), candidate.key) : null;
+        const completed = repeatTap.current.finish(currentTarget);
+        if (completed) openContext(position(e), completed.source, completed.target);
+        else abandon(true); // Blank / picture taps retain tools.down's selection.
+      } else if (tap) openContext(position(e), 'tap'); // Backward-compatible callers.
       else {
+        repeatTap.current.reset();
         if (pendingTap.current === e.pointerId) latest.current.tools.down(e, latest.current.canvas);
         latest.current.tools.up(e);
       }
@@ -182,7 +204,12 @@ export function useCanvasNavigation(tools: Tools, canvas: RefObject<HTMLCanvasEl
       onPointerMove: move,
       onPointerUp: (e: PointerEvent<HTMLElement>) => end(e),
       onPointerCancel: (e: PointerEvent<HTMLElement>) => end(e, true),
-      onPointerLeave: () => intent.current.leave(),
+      onPointerLeave: () => {
+        // Touch browsers emit leave after every completed tap. Only an active
+        // press leaving the viewport interrupts repeat-selection intent.
+        if (intent.current.current) repeatTap.current.reset();
+        intent.current.leave();
+      },
       onContextMenu: contextMenu,
       onClickCapture: (e: MouseEvent<HTMLElement>) => {
         // A portalled menu may still be a React descendant of the viewport. Only

@@ -243,10 +243,16 @@ test('phone polygon creation uses touch taps and commits exactly one region only
   await expect(contextMenu(page)).toBeHidden();
 });
 
-test('a light touch deletes only the hit region and undo restores it without changing its sibling', async ({ page }) => {
+test('first tap selects, repeat tap opens deletion, and undo preserves sibling geometry', async ({ page }) => {
   const project = fixture();
   await start(page, project, 390, 844);
   const point = await logical(page, 350, 450);
+  await page.touchscreen.tap(point.x, point.y);
+  await expect(contextMenu(page)).toBeHidden();
+  await expect(page.locator('footer')).toContainText('已选中双范围雾气的区域 1');
+  expect((await stored(page)).shots[0].effects).toEqual(project.shots[0].effects);
+  // This is repeat selection, not a timed double-click.
+  await page.waitForTimeout(700);
   await page.touchscreen.tap(point.x, point.y);
   await expect(contextMenu(page)).toBeVisible();
   expect((await stored(page)).shots[0].effects).toEqual(project.shots[0].effects);
@@ -259,6 +265,8 @@ test('a light touch deletes only the hit region and undo restores it without cha
   await page.getByRole('button', { name: '收起菜单', exact: true }).click();
   await expect.poll(async () => (await stored(page)).shots[0].effects[0].regions).toEqual(project.shots[0].effects[0].regions);
   await page.touchscreen.tap(point.x, point.y);
+  await expect(contextMenu(page)).toBeHidden();
+  await page.touchscreen.tap(point.x, point.y);
   await contextMenu(page).getByRole('button', { name: '区域属性', exact: true }).click();
   await expect(page.locator('#pane-inspector')).toHaveAttribute('data-open', 'true');
   await expect(page.locator('#pane-inspector .active-region')).toContainText('区域 1');
@@ -268,6 +276,8 @@ test('deleting the last region retains its empty element and undo restores the r
   const project = fixture(); project.shots[0].effects[0].regions.splice(1);
   await start(page, project, 390, 844);
   const point = await logical(page, 350, 450);
+  await page.touchscreen.tap(point.x, point.y);
+  await expect(contextMenu(page)).toBeHidden();
   await page.touchscreen.tap(point.x, point.y);
   await contextMenu(page).getByRole('button', { name: '删除此区域', exact: true }).click();
   await expect(contextMenu(page)).toBeHidden();
@@ -283,6 +293,38 @@ test('deleting the last region retains its empty element and undo restores the r
   await page.getByRole('button', { name: '撤销', exact: true }).click();
   await page.getByRole('button', { name: '收起菜单', exact: true }).click();
   await expect.poll(async () => (await stored(page)).shots[0].effects).toEqual(project.shots[0].effects);
+});
+
+test('changing regions or tapping blank resets repeat selection without opening a menu', async ({ page }) => {
+  const project = fixture();
+  await start(page, project, 390, 844);
+  const a = await logical(page, 350, 450), b = await logical(page, 1150, 450), blank = await logical(page, 750, 850);
+  await page.touchscreen.tap(a.x, a.y);
+  await expect(contextMenu(page)).toBeHidden();
+  await page.touchscreen.tap(b.x, b.y);
+  await expect(contextMenu(page)).toBeHidden();
+  await expect(page.locator('footer')).toContainText('区域 2');
+  await page.touchscreen.tap(blank.x, blank.y);
+  await expect(contextMenu(page)).toBeHidden();
+  await page.touchscreen.tap(b.x, b.y);
+  await expect(contextMenu(page)).toBeHidden();
+  await page.touchscreen.tap(b.x, b.y);
+  await expect(contextMenu(page)).toBeVisible();
+  await expect(contextMenu(page)).toContainText('双范围雾气 · 区域 2');
+  expect((await stored(page)).shots[0].effects).toEqual(project.shots[0].effects);
+});
+
+test('phone repeat selection keeps an overlapping target even if ordinary pointer-down picks its sibling', async ({ page }) => {
+  const project = fixture(true);
+  await start(page, project, 390, 844);
+  const p = await logical(page, 450, 450);
+  await page.touchscreen.tap(p.x, p.y);
+  await expect(contextMenu(page)).toBeHidden();
+  await expect(page.locator('footer')).toContainText('区域 2');
+  await page.touchscreen.tap(p.x, p.y);
+  await expect(contextMenu(page)).toBeVisible();
+  await expect(contextMenu(page).getByLabel('选择命中的区域', { exact: true })).toHaveValue('context-fog:1');
+  expect((await stored(page)).shots[0].effects).toEqual(project.shots[0].effects);
 });
 
 test('overlapping hits can be selected explicitly before removing a single region', async ({ page }) => {
@@ -309,6 +351,10 @@ test('explicit move of an overlapping region keeps the selected target and same-
   await contextMenu(page).getByRole('button', { name: '移动此区域', exact: true }).click();
   await expect(contextMenu(page)).toBeHidden();
   await expect(page.getByRole('button', { name: '移动 V', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const selection = await logical(page, 450, 450);
+  await page.touchscreen.tap(selection.x, selection.y);
+  await expect(contextMenu(page)).toBeHidden();
+  await expect(page.locator('footer')).toContainText('区域 2');
   // This start point belongs to both regions. The menu's explicit second-region
   // choice must win over the ordinary first-hit rule when the drag begins.
   const firstDrag = await measuredDrag(page, { x: 450, y: 450 }, { x: 520, y: 500 }, 'overlap-move-first');

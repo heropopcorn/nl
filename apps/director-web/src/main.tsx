@@ -28,7 +28,7 @@ import { actorPosition } from '../../../packages/core/routes';
 import { hitRegions, getRegion, deleteRegion, type RegionHit, type RegionEffectType } from './region-actions';
 import { CanvasContextMenu, type RegionAction, type RegionShape } from './CanvasContextMenu';
 import { HeaderMenu, MobileDrawer, WorkspaceNavigation, useCompactLayout, type WorkspacePane } from './ResponsiveLayout';
-import { useCanvasNavigation } from './useCanvasNavigation';
+import { useCanvasNavigation, type CanvasTapTarget } from './useCanvasNavigation';
 import './responsive.css';
 import { useProjectDocument } from './useProjectDocument';
 import { SaveIndicator } from './SaveIndicator';
@@ -50,7 +50,7 @@ function App() {
   const [regionMenu, setRegionMenu] = useState<RegionMenu | null>(null);
   const [pendingRegionAction, setPendingRegionAction] = useState<PendingRegionAction | null>(null);
   const drawingDraft = useRef(false);
-  const mobileHelp = '手机操作：画布始终保留，元素和资源从左侧抽屉打开，属性从右侧打开，章节与场景从底部打开。点收起或遮罩返回画布，选择元素、切换场景或启动绘制后自动收起。2D画布长按约半秒，或点新建区域，可新建水流、雾气、雨雪等范围；移动工具下轻点已有区域可编辑、重绘或删除这一块，重叠区域在菜单中切换，误删可用顶部菜单的撤销恢复。选择套索后沿边界逐点点击，再点闭合范围；矩形则按住拖动。取消绘制不会创建空元素。单指使用当前工具，双指缩放和平移画布；平移画布按钮支持单指移动视图，适应画布复位。图片缩放请拖四角，旋转请拖选框外圈。路线或水流导线逐点点击后按完成线段。文件、编辑、备份和导入导出在菜单中；请定期导出备份。';
+  const mobileHelp = '手机操作：画布始终保留，元素和资源从左侧抽屉打开，属性从右侧打开，章节与场景从底部打开。点收起或遮罩返回画布，选择元素、切换场景或启动绘制后自动收起。2D画布长按约半秒，或点新建区域，可新建水流、雾气、雨雪等范围；移动工具下首次轻点只选中，再次轻点同一已选区域或长按才弹出编辑、重绘、删除菜单，无需快速双击。重叠区域在菜单中切换，误删可用顶部菜单的撤销恢复。选择套索后沿边界逐点点击，再点闭合范围；矩形则按住拖动。取消绘制不会创建空元素。单指使用当前工具，双指缩放和平移画布；平移画布按钮支持单指移动视图，适应画布复位。图片缩放请拖四角，旋转请拖选框外圈。路线或水流导线逐点点击后按完成线段。文件、编辑、备份和导入导出在菜单中；请定期导出备份。';
   useEffect(() => { if (!compact) setPane('canvas'); }, [compact]);
   useEffect(() => {
     if (!compact || (pane !== 'elements' && pane !== 'resources')) return;
@@ -96,6 +96,10 @@ function App() {
   const navigation = useCanvasNavigation(tools, canvas, {
     contextEnabled: contextEnabled && !regionMenu, tapContextEnabled: tools.tool === 'move' && !tools.hasDraft && !tools.creating,
     scopeKey: `${shot.id}:${pane}:${tools.tool}`, onContextMenu: openRegionMenu,
+    getTapTarget: (point, preferredKey) => {
+      const target = resolveRegionTarget(point, true, preferredKey)?.target;
+      return target ? { key: regionTapKey(target), selected: selected === target.effectId && activeRegion === target.index } : null;
+    },
   });
   const { zoom, pan } = navigation;
   function showCanvas() { setPane('canvas'); }
@@ -108,7 +112,8 @@ function App() {
     if (content) content.scrollTop = 0;
   }, [shot.id, selected]);
   function selectFromList(id: string) { setSelected(id); showCanvas(); }
-  function openRegionMenu(anchor: Point, source: 'context' | 'tap') {
+  function regionTapKey(hit: RegionHit) { return JSON.stringify([shot.id, hit.effectId, hit.index, hit.signature]); }
+  function resolveRegionTarget(anchor: Point, tap: boolean, preferredKey?: string) {
     if (!contextEnabled || document.querySelector('dialog[open]') || !canvas.current) return;
     const rect = canvas.current.getBoundingClientRect(), point = clientToLogical(anchor, rect);
     if (!point) return;
@@ -117,15 +122,31 @@ function App() {
     // A tap on a picture still selects the picture; long-press/right-click can
     // reach environmental regions underneath it via the overlap chooser.
     const shown = tools.display ?? current;
-    if (source === 'tap' && shown.actors.some(actor => {
+    if (tap && shown.actors.some(actor => {
       if (!actor.enabled) return false;
       const p = imageLocal(actor, actorPosition(actor, shown, local), point);
       return Math.abs(p.x) <= actor.width / 2 && p.y >= 0 && p.y <= actor.height;
     })) return;
     const scale = Math.min(rect.width / 1280, rect.height / 720);
     const hits = hitRegions(current, point, 6 * 1024 / 720 / Math.max(scale, 0.001));
-    if (source === 'tap' && !hits.length) return;
-    setRegionMenu({ shotId: shot.id, anchor, hits, target: hits[0] ? `${hits[0].effectId}:${hits[0].index}` : '' });
+    // Preserve an explicit overlap choice. A captured pointer-down identity may
+    // not silently turn into a different region if geometry changed mid-touch.
+    const target = preferredKey ? hits.find(hit => regionTapKey(hit) === preferredKey)
+      : hits.find(hit => hit.effectId === selected && hit.index === activeRegion) ?? hits[0];
+    if (preferredKey && !target) return;
+    return { hits, target };
+  }
+  function openRegionMenu(anchor: Point, source: 'context' | 'tap' | 'select', tapTarget?: CanvasTapTarget) {
+    const resolved = resolveRegionTarget(anchor, source !== 'context', tapTarget?.key);
+    if (!resolved || (source !== 'context' && !resolved.target)) return;
+    const { hits, target } = resolved;
+    if (source === 'select' && target) {
+      tools.prepareRegionSelection(target.effectId, target.index); setSelected(target.effectId); selectRegion(target.index);
+      setStatus(`已选中${target.name}的区域 ${target.index + 1}；再次轻点或长按可编辑、删除`);
+      return;
+    }
+    if (source === 'tap' && target) { setSelected(target.effectId); selectRegion(target.index); }
+    setRegionMenu({ shotId: shot.id, anchor, hits, target: target ? `${target.effectId}:${target.index}` : '' });
   }
   const menuHit = regionMenu?.hits.find(hit => `${hit.effectId}:${hit.index}` === regionMenu.target);
   const menuRegion = regionMenu?.shotId === shot.id && menuHit ? getRegion(shot, menuHit) : null;
@@ -300,7 +321,7 @@ function App() {
         </div>
         {loading && <div className="loading-canvas">{loadError || "正在加载背景；导出将在画面就绪后启用"}{loadError && <button onClick={() => { if (renderer.current) retryRender(v => v + 1); else retryRenderer(v => v + 1); }}>重试加载资源</button>}</div>}
       </div>
-      <div className="transport"><span className="live-badge">● 环境效果实时展示</span><small>{compact ? '轻点区域编辑 · 长按新建 · 双指缩放 / 平移' : '右键管理区域 · 中键拖动画布 · 环境效果实时展示'}</small><button className="mobile-inspect" onClick={() => setPane('inspector')}>{selected ? '编辑所选属性' : '背景 / 环境属性'}</button></div>
+      <div className="transport"><span className="live-badge">● 环境效果实时展示</span><small>{compact ? '轻点选中 · 再点或长按编辑 · 双指缩放 / 平移' : '右键管理区域 · 中键拖动画布 · 环境效果实时展示'}</small><button className="mobile-inspect" onClick={() => setPane('inspector')}>{selected ? '编辑所选属性' : '背景 / 环境属性'}</button></div>
     </main>
     {regionMenu && <CanvasContextMenu anchor={regionMenu.anchor} hits={regionMenu.hits} target={menuHit} targetValid={!!menuRegion} canAdd={!!menuRegion && menuRegion.effect.regions.length < 12}
       changeTarget={target => setRegionMenu(current => current ? { ...current, target } : null)} action={actOnRegion} create={createCanvasRegion} close={() => setRegionMenu(null)}/>}

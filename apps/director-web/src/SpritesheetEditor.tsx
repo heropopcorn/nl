@@ -77,7 +77,7 @@ export function SpritesheetEditor({ project, edit, close, saved, initialCategory
     } catch(e) {setMessage(`移除失败：${String(e)}`);}
     finally {setSaving(false);}
   }
-  const preview = sheet.playing ? sheet.active[sheet.index % Math.max(1, sheet.active.length)] : sheet.frames.find(f => f.id === sheet.selected) ?? sheet.active[0];
+  const preview = sheet.previewFrame, previewIndex = sheet.frames.findIndex(frame => frame.id === preview?.id);
   async function save() {
     if (!sheet.packed || saving || sheet.busy) return;
     if (!project.resourceCategories.some(c => c.id === category)) { setMessage('请先新建或选择保存分类'); return; }
@@ -132,10 +132,16 @@ export function SpritesheetEditor({ project, edit, close, saved, initialCategory
       <CategoryCreator project={project} edit={edit} created={setCategory}/>
       <button disabled={!sheet.packed || !category} onClick={save}>{saving ? '正在保存…' : '保存到自定义分类'}</button>
     </fieldset></div></MobileDrawer>
-    <div className="sprite-workspace"><div className="sprite-previews"><section><h3>动画预览 · {sheet.active.length} / {sheet.frames.length} 帧</h3><div className="sprite-stage">{preview && <img alt="当前序列帧" src={preview.previewUrl}/>}</div><button onClick={() => sheet.setPlaying(!sheet.playing)} disabled={sheet.active.length < 2}>{sheet.playing ? '暂停预览' : '播放预览'}</button></section><section><h3>合成图集</h3><div className="sprite-stage">{sheet.packed ? <img alt="合成序列帧" src={sheet.packed.url}/> : <p>编辑帧后请重新合成</p>}</div>{sheet.packed && <small>{sheet.packed.layout.sheetWidth} × {sheet.packed.layout.sheetHeight} · {sheet.packed.layout.cells.length} 帧</small>}</section></div>
+    <div className="sprite-workspace"><div className="sprite-previews"><section><h3>动画预览 · {sheet.active.length} / {sheet.frames.length} 帧</h3><div className="sprite-stage">{preview && <img alt="当前序列帧" src={preview.previewUrl}/>}</div>
+      <p className="sprite-frame-position" aria-label="当前预览帧">{preview ? `第 ${previewIndex + 1} / ${sheet.frames.length} 帧 · ${preview.time.toFixed(2)}s${preview.enabled ? '' : ' · 已禁用，不参与播放和合成'}` : '抽帧后可播放或逐帧检查'}</p>
+      <div className="sprite-preview-controls"><button disabled={sheet.busy || saving || !sheet.frames.length} onClick={() => sheet.stepFrame(-1)}>上一帧</button><button onClick={sheet.togglePlayback} disabled={sheet.busy || saving || sheet.active.length < 2}>{sheet.playing ? '暂停预览' : '播放预览'}</button><button disabled={sheet.busy || saving || !sheet.frames.length} onClick={() => sheet.stepFrame(1)}>下一帧</button></div>
+      <input aria-label="预览帧位置" type="range" min="1" max={Math.max(1, sheet.frames.length)} step="1" value={Math.max(1, previewIndex + 1)} disabled={sheet.busy || saving || !sheet.frames.length} onChange={event => sheet.selectFrame(sheet.frames[Number(event.target.value) - 1].id)}/>
+      <small>暂停停留在当前帧；逐帧检查包含已禁用帧，播放仅使用启用帧。</small>
+      <button className="sprite-save-return" onClick={() => setDrawer('settings')}>检查完成，返回制作 / 保存</button>
+    </section><section><h3>合成图集</h3><div className="sprite-stage">{sheet.packed ? <img alt="合成序列帧" src={sheet.packed.url}/> : <p>编辑帧后请重新合成</p>}</div>{sheet.packed && <small>{sheet.packed.layout.sheetWidth} × {sheet.packed.layout.sheetHeight} · {sheet.packed.layout.cells.length} 帧</small>}</section></div>
     <MobileDrawer id="sprite-frames-drawer" title="帧排序" side="bottom" open={drawer === 'frames'} onClose={() => setDrawer(null)} className="sprite-frames-drawer"><div className="sprite-frame-actions"><button disabled={sheet.busy || saving} onClick={() => sheet.enableAll(true)}>全部启用</button><button disabled={sheet.busy || saving} onClick={() => sheet.enableAll(false)}>全部禁用</button><small>拖动排序，或使用前移／后移；点击帧可回到预览</small></div>
     <div className="sprite-frames">{sheet.frames.map((f, i) => <article key={f.id} className={`${f.enabled ? '' : 'disabled'} ${sheet.selected === f.id ? 'selected' : ''}`} draggable={!sheet.busy && !saving} onDragStart={() => { dragging.current = i; }} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); if (!sheet.busy && !saving && dragging.current !== null) sheet.reorder(dragging.current, i); dragging.current = null; }}>
-      <button onClick={() => { sheet.setSelected(f.id); sheet.setPlaying(false); setDrawer(null); }}><img src={f.previewUrl} alt={`帧 ${i + 1}`}/></button><label className="check"><input type="checkbox" aria-label={`启用帧 ${i + 1}`} checked={f.enabled} disabled={sheet.busy || saving} onChange={e => sheet.toggle(f.id, e.target.checked)}/>#{i + 1} · {f.time.toFixed(2)}s</label><button disabled={sheet.busy || saving || i === 0} onClick={() => sheet.reorder(i, i - 1)}>前移</button><button disabled={sheet.busy || saving || i === sheet.frames.length - 1} onClick={() => sheet.reorder(i, i + 1)}>后移</button>
+      <button onClick={() => { sheet.selectFrame(f.id); setDrawer(null); }}><img src={f.previewUrl} alt={`帧 ${i + 1}`}/></button><label className="check"><input type="checkbox" aria-label={`启用帧 ${i + 1}`} checked={f.enabled} disabled={sheet.busy || saving} onChange={e => sheet.toggle(f.id, e.target.checked)}/>#{i + 1} · {f.time.toFixed(2)}s</label><button disabled={sheet.busy || saving || i === 0} onClick={() => sheet.reorder(i, i - 1)}>前移</button><button disabled={sheet.busy || saving || i === sheet.frames.length - 1} onClick={() => sheet.reorder(i, i + 1)}>后移</button>
     </article>)}</div>{!sheet.frames.length && <p className="muted">暂无帧，请先在“制作 / 保存”中选择视频并抽帧。</p>}</MobileDrawer></div>
   </div></ResourceDialog>;
 }
