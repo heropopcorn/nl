@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState, type PointerEvent, type RefObject } from 'react';
-import { type Shot } from '../../../packages/core';
+import { rectSchema, type Shot, type Effect } from '../../../packages/core';
 import { clientToLogical, containsPoint, polygonBounds, regionPoints, snapCoordinate, validPolygon, type Point } from '../../../packages/core/geometry';
 import { imageCorners, imageLocal } from '../../../packages/core/handles';
 import { actorPosition } from '../../../packages/core/routes';
+import { getRegion, hitRegions, type RegionHit } from './region-actions';
 type Tool = 'move' | 'scale' | 'rotate' | 'vertices' | 'route' | 'flow' | 'lasso' | 'rect';
 const toolNames: Record<Tool, string> = { move: '移动 V', scale: '缩放', rotate: '旋转', vertices: '顶点', route: '画路线', flow: '水流导线', lasso: '多边形套索', rect: '矩形区域' };
 const screen = (p: Point) => `${100 + p.x * 720 / 1024},${720 - p.y * 720 / 1024}`;
 export function useCanvasTools({ shot, local, selected, select, change, pause, notify, locked, playing, activeRegion, selectRegion }: { shot: Shot; local: number; selected: string; select: (id: string) => void; change: (fn: (s: Shot) => void) => boolean | void; pause: () => void; notify: (s: string) => void; locked: boolean; playing: boolean; activeRegion: number | null; selectRegion: (i: number | null) => void }) {
   const [tool, setTool] = useState<Tool>('move'), [preview, setPreview] = useState<Shot | null>(null), [stroke, setStroke] = useState<Point[]>([]), [walk, setWalk] = useState<Record<string, Point>>({});
+  const [creation, setCreation] = useState<Effect | null>(null);
   const held = useRef(new Set<string>()), walkRef = useRef(walk), noted = useRef(false);
   const startWalk = useRef(() => {}), stopWalk = useRef(() => {});
   const shotRef = useRef(shot), selectedRef = useRef(selected), localRef = useRef(local);
   shotRef.current = shot; selectedRef.current = selected; localRef.current = local; walkRef.current = walk;
-  const drag = useRef<{ start: Point; source: Shot; id: string; region?: number; vertex?: [number, number]; stroke?: boolean; corner?: number; rotate?: boolean } | null>(null);
+  const drag = useRef<{ start: Point; source: Shot; id: string; region?: number; regionTarget?: RegionHit; vertex?: [number, number]; stroke?: boolean; corner?: number; rotate?: boolean } | null>(null);
+  const moveTarget = useRef<RegionHit | null>(null);
   const replaceRegion = useRef<number | undefined>(undefined);
   const replaceShape = useRef<string | undefined>(undefined);
   const [hover, setHover] = useState<Point | null>(null);
@@ -53,11 +56,12 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
     stopWalk.current = stop;
     return stop;
   }, [notify]);
-  useEffect(() => { if (drag.current?.id !== selected) { setPreview(null); previewRef.current = null; drag.current = null; } setStroke([]); strokeRef.current = []; replaceRegion.current = undefined; replaceShape.current = undefined; setHover(null); }, [selected, shot.id]);
-  const actor = shot.actors.find(a => a.id === selected), effect = shot.effects.find(e => e.id === selected);
+  useEffect(() => { if (drag.current?.id !== selected) { setPreview(null); previewRef.current = null; drag.current = null; } setStroke([]); strokeRef.current = []; replaceRegion.current = undefined; replaceShape.current = undefined; setHover(null); setCreation(null); moveTarget.current = null; }, [selected, shot.id]);
+  const actor = shot.actors.find(a => a.id === selected), effect = creation ?? shot.effects.find(e => e.id === selected);
   function unavailable(t: Tool) {
     if (locked) return '当前操作期间工具已锁定';
     if (shot.studio !== 'pixi') return '画布工具仅适用于 2D 布景';
+    if (creation && !['move', 'lasso', 'rect'].includes(t)) return '请先完成或取消新区域的绘制';
     const regional = effect && effect.type !== 'lightning';
     if ((t === 'scale' || t === 'rotate') && !actor && !(regional && effect.regions.length)) return '请先选中图片元素或已有范围的环境元素';
     if (t === 'vertices' && !actor?.route.length && !(regional && effect.regions.length)) return '请先选中已有路线或区域的元素';
@@ -76,8 +80,31 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
     lasso: '单击放点 · 双击/回首点/Enter 闭合 · Backspace 撤回 · Esc 取消',
     rect: '按住并拖动绘制矩形范围，松开保存',
   };
-  function choose(t: Tool) { const reason = unavailable(t); if (reason) { notify(reason); return false; } pause(); setTool(t); setStroke([]); strokeRef.current = []; replaceRegion.current = undefined; replaceShape.current = undefined; drag.current = null; previewRef.current = null; setPreview(null); setHover(null); if (t !== 'move') notify(help[t]); return true; }
+  function choose(t: Tool) { const reason = unavailable(t); if (reason) { notify(reason); return false; } moveTarget.current = null; if (t !== 'lasso' && t !== 'rect') setCreation(null); pause(); setTool(t); setStroke([]); strokeRef.current = []; replaceRegion.current = undefined; replaceShape.current = undefined; drag.current = null; previewRef.current = null; setPreview(null); setHover(null); if (t !== 'move') notify(help[t]); return true; }
   function startRegion(replace?: number) { if (!choose('lasso')) return; replaceRegion.current = replace; replaceShape.current = replace === undefined ? undefined : JSON.stringify(effect?.regions[replace]); }
+  function moveRegion(index: number) {
+    const current = shot.effects.find(item => item.id === selected), region = current?.regions[index];
+    if (!current || !current.enabled || current.type === 'lightning' || !Number.isInteger(index) || !region) {
+      notify('移动目标已改变或被删除，请重新选择此区域'); return false;
+    }
+    if (!choose('move')) return false;
+    moveTarget.current = { effectId: current.id, index, signature: JSON.stringify(region), name: current.name, type: current.type, layer: current.layer };
+    selectRegion(index);
+    notify('拖动已选区域；点击“移动 V”可恢复自由选择');
+    return true;
+  }
+  function beginRegion(draft: Effect, shape: 'lasso' | 'rect' = 'lasso') {
+    if (locked || shot.studio !== 'pixi' || draft.type === 'lightning') return false;
+    pause(); cancel(); setCreation(structuredClone(draft)); setTool(shape);
+    strokeRef.current = []; setStroke([]); setHover(null); replaceRegion.current = undefined; replaceShape.current = undefined;
+    notify(`正在新建${draft.name}：${shape === 'lasso' ? '沿边界逐点点击，再点闭合范围' : '拖出矩形，松手完成'}；取消不会保存`);
+    return true;
+  }
+  function createdRegion() {
+    if (!creation) return;
+    select(creation.id); selectRegion(0); setCreation(null); setTool('move');
+    notify(`已新建${creation.name}，可直接点选编辑；可撤销`);
+  }
   // Switching between compatible region elements keeps the drawing tool; selecting
   // a background or deleting the last editable shape returns to selection mode.
   const invalidTool = !locked && unavailable(tool);
@@ -98,16 +125,17 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
       const target = replaceRegion.current;
       if (target !== undefined && (!effect.regions[target] || JSON.stringify(effect.regions[target]) !== replaceShape.current)) { notify('重绘的区域已删除或改变，请重新选择区域后绘制'); return; }
       if (target === undefined && effect.regions.length >= 12) { notify('每个元素最多 12 个区域'); return; }
-      applied = change(s => { const f = s.effects.find(e => e.id === effect.id); if (!f) throw new Error('区域所属元素已删除'); if (target !== undefined && JSON.stringify(f.regions[target]) !== replaceShape.current) throw new Error('重绘区域已改变，请重新选择'); const r = { ...f.regions[target ?? -1], ...polygonBounds(points), points }; if (target === undefined) f.regions.push(r); else f.regions[target] = r; });
+      applied = change(s => { if (creation) { if (s.effects.some(e => e.id === creation.id)) throw new Error('此区域已创建，请重新选择'); s.effects.push({ ...structuredClone(creation), regions: [{ ...polygonBounds(points), points }] }); return; } const f = s.effects.find(e => e.id === effect.id); if (!f) throw new Error('区域所属元素已删除'); if (target !== undefined && JSON.stringify(f.regions[target]) !== replaceShape.current) throw new Error('重绘区域已改变，请重新选择'); const r = { ...f.regions[target ?? -1], ...polygonBounds(points), points }; if (target === undefined) f.regions.push(r); else f.regions[target] = r; });
       if (applied === false) return;
-      selectRegion(target ?? effect.regions.length); replaceRegion.current = undefined;
-      notify('区域已保存；套索保持选中，可继续逐点绘制');
+      if (creation) createdRegion();
+      else { selectRegion(target ?? effect.regions.length); notify('区域已保存；套索保持选中，可继续逐点绘制'); }
+      replaceRegion.current = undefined;
     } else if (tool === 'rect' && effect && strokeRef.current.length >= 3) {
       const bounds = polygonBounds(strokeRef.current);
       if (bounds.width < 8 || bounds.height < 8) { notify('矩形太小，请拖动至少 8 × 8 的范围'); return; }
       if (effect.regions.length >= 12) { notify('每个元素最多 12 个范围，请先删除不需要的范围'); return; }
-      applied = change(s => { const current = s.effects.find(e => e.id === effect.id); if (!current) throw new Error('区域所属元素已删除'); current.regions.push(bounds); });
-      if (applied !== false) selectRegion(effect.regions.length);
+      applied = change(s => { if (creation) { if (s.effects.some(e => e.id === creation.id)) throw new Error('此区域已创建，请重新选择'); s.effects.push({ ...structuredClone(creation), regions: [bounds] }); return; } const current = s.effects.find(e => e.id === effect.id); if (!current) throw new Error('区域所属元素已删除'); current.regions.push(bounds); });
+      if (applied !== false) { if (creation) createdRegion(); else selectRegion(effect.regions.length); }
     } else return;
     if (applied === false) return;
     if (tool === 'flow' || tool === 'route') notify(tool === 'flow' ? '水流导线已保存，可继续绘制下一条' : '路线已保存；在属性中调整速度和显示状态');
@@ -142,6 +170,17 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
   function down(e: PointerEvent, canvas: RefObject<HTMLCanvasElement | null>) {
     if (locked || shot.studio !== 'pixi' || e.button !== 0) return;
     const p = point(e, canvas); if (!p) return; pause();
+    if (tool === 'move' && moveTarget.current) {
+      const target = moveTarget.current, current = getRegion(shot, target);
+      if (!current || !current.effect.enabled) { notify('移动目标已改变或被删除，请重新选择此区域'); return; }
+      if (!hitRegions(shot, p, hitRadius(e, canvas, 8)).some(hit => hit.effectId === target.effectId && hit.index === target.index)) {
+        notify('请在已选区域内拖动；点击“移动 V”可恢复自由选择'); return;
+      }
+      // An explicit context-menu target takes precedence over overlapping actors
+      // and sibling regions. Never replace it with the first generic hit.
+      drag.current = { start: p, source: structuredClone(shot), id: target.effectId, region: target.index, regionTarget: target };
+      selectRegion(target.index); e.currentTarget.setPointerCapture(e.pointerId); return;
+    }
     if (tool === 'route' || tool === 'flow') { if ((tool === 'route' && !actor) || (tool === 'flow' && effect?.type !== 'water')) { notify('路线需选中图片元素，水流导线需选中水域'); return; } if (strokeRef.current.length >= 128) { notify('最多 128 个点，请先完成线段'); return; } const last = strokeRef.current.at(-1); if (last && Math.hypot(p.x - last.x, p.y - last.y) < 1) return; strokeRef.current = [...strokeRef.current, p]; setStroke(strokeRef.current); return; }
     if (tool === 'lasso') {
       if (!effect || effect.type === 'lightning') { notify('请先选中有区域的环境元素'); return; }
@@ -228,7 +267,8 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
     if (drag.current?.stroke) commitStroke();
     else if (drag.current && previewRef.current) {
       const d = drag.current, next = previewRef.current;
-      change(s => {
+      let movedSignature: string | undefined;
+      const applied = change(s => {
         // A drag preview is based on pointer-down state. Commit only transform
         // fields, never the whole shot: uploads or property edits may have landed
         // while the pointer was down. Reject conflicting target edits explicitly.
@@ -240,7 +280,17 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
         };
         if (d.source.actors.some(a => a.id === d.id)) merge(d.source.actors.find(a => a.id === d.id), next.actors.find(a => a.id === d.id), s.actors.find(a => a.id === d.id), ['start', 'end', 'route', 'sortY', 'scale', 'rotation']);
         else merge(d.source.effects.find(f => f.id === d.id), next.effects.find(f => f.id === d.id), s.effects.find(f => f.id === d.id), ['regions', 'flowLines', 'sortY']);
+        if (d.regionTarget) {
+          const region = s.effects.find(effect => effect.id === d.id)?.regions[d.regionTarget.index];
+          if (!region) throw new Error('移动目标已删除，未覆盖现有内容');
+          // Match project validation's property order (including optional points
+          // and splash flags), so the next drag recognizes our own saved shape.
+          movedSignature = JSON.stringify(rectSchema.parse(region));
+        }
       });
+      if (applied !== false && movedSignature && d.regionTarget && moveTarget.current === d.regionTarget) {
+        moveTarget.current = { ...d.regionTarget, signature: movedSignature };
+      }
     }
     drag.current = null; previewRef.current = null; setPreview(null);
   }
@@ -261,6 +311,6 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
   const display = preview || Object.keys(walk).length ? applyWalk(preview ?? shot) : null;
   const shown = display ?? shot, current = shown.actors.find(a => a.id === selected), pos = current ? actorPosition(current, shown, local) : null;
   const overlay = <svg className="selection-overlay tool-overlay" viewBox="0 0 1280 720">{current && pos && <g transform={`translate(${100 + pos.x * 720 / 1024} ${720 - pos.y * 720 / 1024}) rotate(${-current.rotation}) scale(${current.scale})`}><rect x={-current.width * 720 / 2048} y={-current.height * 720 / 1024} width={current.width * 720 / 1024} height={current.height * 720 / 1024}/>{[-1, 1].flatMap(x => [0, -current.height * 720 / 1024].map(y => <rect key={`${x},${y}`} x={x * current.width * 720 / 2048 - 4} y={y - 4} width="8" height="8"/>))}</g>}{tool === "vertices" && current?.route.map((p,i) => <circle key={i} cx={100+p.x*720/1024} cy={720-p.y*720/1024} r="5"/>)}{current?.routeVisible && <polyline points={current.route.map(screen).join(' ')}/>} {current?.sortY !== null && current?.sortY !== undefined && <line x1="100" x2="1180" y1={720 - current.sortY * 720 / 1024} y2={720 - current.sortY * 720 / 1024}/>}{tool === 'vertices' && effect?.regions.flatMap((r, ri) => (activeRegion === null || activeRegion === ri ? regionPoints(r) : []).map((v, vi) => <circle key={`${ri}-${vi}`} cx={100 + v.x * 720 / 1024} cy={720 - v.y * 720 / 1024} r="5"/>))}{effect?.flowLines.map((line, i) => <polyline key={i} points={line.map(screen).join(' ')}/>)}<g aria-label="多边形草稿"><polyline points={[...stroke, ...(tool === 'lasso' && hover && stroke.length ? [hover] : [])].map(screen).join(' ')}/>{tool === 'lasso' && stroke.map((p, i) => <circle key={i} cx={100+p.x*720/1024} cy={720-p.y*720/1024} r={i === 0 ? 7 : 4}/>)}</g></svg>;
-  const toolbar = <><div className="canvas-tools">{(Object.entries(toolNames) as [Tool, string][]).map(([key, name]) => <button key={key} disabled={!!unavailable(key)} title={unavailable(key) || help[key]} aria-pressed={tool === key} className={tool === key ? 'active' : ''} onClick={() => key === 'lasso' ? startRegion() : choose(key)}>{name}</button>)}<button disabled={!actor || locked || shot.studio !== 'pixi'} title={actor ? '水平镜像所选图片元素' : '请先选中图片元素'} onClick={() => change(s => { const a = s.actors.find(a => a.id === selected); if (!a) throw new Error('镜像元素已删除'); a.flipX = !a.flipX; })}>镜像</button>{tool !== 'move' && <small>{help[tool]}</small>}</div>{stroke.length > 0 && <div className="draft-actions"><button disabled={locked} onClick={commitStroke}>{tool === 'lasso' || tool === 'rect' ? '闭合范围' : '完成线段'}</button><button disabled={locked} onClick={() => { strokeRef.current = strokeRef.current.slice(0, -1); setStroke(strokeRef.current); }}>撤销顶点</button><button disabled={locked} onClick={() => choose('move')}>取消绘制</button></div>}</>;
-  return { display, toolbar, overlay, down, move, up, cancel, checkpoint, tapOnly: ['lasso', 'route', 'flow'].includes(tool), tool, choose, startRegion, hasDraft: stroke.length > 0, doubleClick: () => { if (tool === 'lasso' && strokeRef.current.length >= 3) commitStroke(); } };
+  const toolbar = <><div className="canvas-tools">{(Object.entries(toolNames) as [Tool, string][]).map(([key, name]) => <button key={key} disabled={!!unavailable(key)} title={unavailable(key) || help[key]} aria-pressed={tool === key} className={tool === key ? 'active' : ''} onClick={() => key === 'lasso' ? startRegion() : choose(key)}>{name}</button>)}<button disabled={!actor || locked || shot.studio !== 'pixi'} title={actor ? '水平镜像所选图片元素' : '请先选中图片元素'} onClick={() => change(s => { const a = s.actors.find(a => a.id === selected); if (!a) throw new Error('镜像元素已删除'); a.flipX = !a.flipX; })}>镜像</button>{tool !== 'move' && <small>{help[tool]}</small>}</div>{(stroke.length > 0 || creation) && <div className="draft-actions">{creation && <span className="creation-hint">新建 {creation.name} · {tool === 'rect' ? '拖出矩形' : '逐点点击后闭合'}</span>}{stroke.length > 0 && <><button disabled={locked} onClick={commitStroke}>{tool === 'lasso' || tool === 'rect' ? '闭合范围' : '完成线段'}</button><button disabled={locked} onClick={() => { strokeRef.current = strokeRef.current.slice(0, -1); setStroke(strokeRef.current); }}>撤销顶点</button></>}<button disabled={locked} onClick={() => choose('move')}>取消绘制</button></div>}</>;
+  return { display, toolbar, overlay, down, move, up, cancel, checkpoint, tapOnly: ['lasso', 'route', 'flow'].includes(tool), tool, choose, moveRegion, startRegion, beginRegion, creating: !!creation, hasDraft: stroke.length > 0, doubleClick: () => { if (tool === 'lasso' && strokeRef.current.length >= 3) commitStroke(); } };
 }

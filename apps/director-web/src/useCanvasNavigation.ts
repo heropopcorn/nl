@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type PointerEvent, type RefObject } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent, type RefObject } from 'react';
+import { PointerIntent } from './pointer-intent';
 type Position = { x: number; y: number };
 type View = { zoom: number; pan: Position };
 type Tools = {
@@ -9,55 +10,123 @@ type Tools = {
   checkpoint: () => () => void;
   tapOnly: boolean;
 };
+export type CanvasNavigationOptions = {
+  contextEnabled?: boolean;
+  tapContextEnabled?: boolean;
+  onContextMenu?: (point: Position, source: 'context' | 'tap') => void;
+  /** Change with scene / active pane / tool, not on every render. */
+  scopeKey?: string;
+};
 const clampZoom = (zoom: number) => Math.max(0.25, Math.min(4, zoom));
 
-export function useCanvasNavigation(tools: Tools, canvas: RefObject<HTMLCanvasElement | null>) {
+export function useCanvasNavigation(tools: Tools, canvas: RefObject<HTMLCanvasElement | null>, options: CanvasNavigationOptions = {}) {
   const [view, setView] = useState<View>({ zoom: 1, pan: { x: 0, y: 0 } });
   const [panMode, setPanMode] = useState(false);
-  useEffect(() => {
-    const key = (event: KeyboardEvent) => {
-      if (document.querySelector('dialog[open]') || (event.target instanceof HTMLElement && (event.target.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(event.target.tagName)))) return;
-      if (event.key.toLowerCase() === 'v' || event.key === 'Escape' || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 't')) setPanMode(false);
-    };
-    window.addEventListener('keydown', key);
-    return () => window.removeEventListener('keydown', key);
-  }, []);
   const current = useRef(view); current.current = view;
+  const latest = useRef({ tools, options, canvas, panMode }); latest.current = { tools, options, canvas, panMode };
   const pointers = useRef(new Map<number, Position>());
   const gesture = useRef<{ center: Position; distance: number; view: View } | null>(null);
   const panPointer = useRef<{ id: number; point: Position } | null>(null);
   const interrupted = useRef(false), rollback = useRef<(() => void) | null>(null);
   const pendingTap = useRef<number | null>(null);
+  const intent = useRef(new PointerIntent());
+  const pressScope = useRef(options.scopeKey);
+  const contextConsumed = useRef(false), suppressClick = useRef(false), suppressNativeContext = useRef(false);
   const update = (next: View) => { current.current = next; setView(next); };
-  const position = (e: PointerEvent) => ({ x: e.clientX, y: e.clientY });
+  const position = (e: { clientX: number; clientY: number }) => ({ x: e.clientX, y: e.clientY });
+  const ownsEvent = (e: { currentTarget: HTMLElement; target: EventTarget }) => e.target instanceof Node && e.currentTarget.contains(e.target);
+  const contextAllowed = () => latest.current.options.contextEnabled !== false && !!latest.current.options.onContextMenu;
+
+  function abandon(restoreDraft: boolean, resetPointers = false) {
+    intent.current.cancel();
+    latest.current.tools.cancel();
+    if (restoreDraft) rollback.current?.();
+    rollback.current = null; pendingTap.current = null;
+    gesture.current = null; panPointer.current = null;
+    if (resetPointers) pointers.current.clear();
+    // Keep this until all fingers lift (or a fresh pointer-down) so opening a
+    // modal / switching tools cannot cause the old release to commit a transform.
+    interrupted.current = true;
+  }
+
+  function openContext(point: Position, source: 'context' | 'tap') {
+    if (!contextAllowed()) return;
+    abandon(true);
+    contextConsumed.current = true; suppressClick.current = true; suppressNativeContext.current = true;
+    latest.current.options.onContextMenu?.(point, source);
+  }
+
+  useEffect(() => {
+    // A new scope must never restore draft points from a previous scene. Tools
+    // own scene/draft resets; navigation only drops the pending pointer action.
+    abandon(false, true);
+  }, [options.scopeKey, options.contextEnabled, options.tapContextEnabled, tools.tapOnly, panMode]);
+  useEffect(() => {
+    const blur = () => abandon(true, true);
+    const visibility = () => { if (document.hidden || document.visibilityState === 'hidden') blur(); };
+    const key = (event: KeyboardEvent) => {
+      if (document.querySelector('dialog[open]') || (event.target instanceof HTMLElement && (event.target.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(event.target.tagName)))) return;
+      if (event.key.toLowerCase() === 'v' || event.key === 'Escape' || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 't')) {
+        abandon(true, true); latest.current.panMode = false; setPanMode(false);
+      }
+    };
+    window.addEventListener('keydown', key); window.addEventListener('blur', blur);
+    document.addEventListener('visibilitychange', visibility);
+    return () => {
+      intent.current.cancel();
+      window.removeEventListener('keydown', key); window.removeEventListener('blur', blur);
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, []);
+
   function measure(e: PointerEvent<HTMLElement>) {
     const [a, b] = [...pointers.current.values()], rect = e.currentTarget.getBoundingClientRect();
     return { center: { x: (a.x + b.x) / 2 - rect.left - rect.width / 2, y: (a.y + b.y) / 2 - rect.top - rect.height / 2 }, distance: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)) };
   }
   function down(e: PointerEvent<HTMLElement>) {
+    if (!ownsEvent(e)) return;
+    // Right clicks are handled only by contextmenu, never by selection or up().
+    if (e.button !== 0 && e.button !== 1) { intent.current.cancel(); suppressNativeContext.current = false; return; }
+    if (!pointers.current.size) {
+      interrupted.current = false; contextConsumed.current = false;
+      suppressClick.current = false; suppressNativeContext.current = false;
+    }
+    const active = latest.current;
+    pressScope.current = active.options.scopeKey;
     if (e.pointerType === 'touch') {
       e.currentTarget.setPointerCapture(e.pointerId);
       pointers.current.set(e.pointerId, position(e));
+      if (contextConsumed.current) return;
       if (pointers.current.size >= 2) {
+        intent.current.cancel();
         // The first finger may have started a drag or placed a lasso point. Undo
         // only that in-progress interaction, never a previously committed edit.
-        tools.cancel(); rollback.current?.(); rollback.current = null;
-        interrupted.current = true; panPointer.current = null;
-        pendingTap.current = null;
+        active.tools.cancel(); rollback.current?.(); rollback.current = null;
+        interrupted.current = true; panPointer.current = null; pendingTap.current = null;
         gesture.current = { ...measure(e), view: current.current };
         return;
       }
       if (interrupted.current) return;
-      rollback.current = tools.checkpoint();
     }
-    if (e.button === 1 || (panMode && e.button === 0)) {
+    if (e.button === 1 || (active.panMode && e.button === 0)) {
+      intent.current.cancel();
       e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId);
       panPointer.current = { id: e.pointerId, point: position(e) }; return;
     }
-    if (e.pointerType === 'touch' && tools.tapOnly) { pendingTap.current = e.pointerId; return; }
-    tools.down(e, canvas);
+    rollback.current = active.tools.checkpoint();
+    const scope = active.options.scopeKey;
+    intent.current.begin(e.pointerId, position(e), e.pointerType === 'touch' && contextAllowed() ? point => {
+      if (scope === latest.current.options.scopeKey && pointers.current.size === 1 && pointers.current.has(e.pointerId) && !interrupted.current && !latest.current.panMode && !panPointer.current) openContext(point, 'context');
+    } : undefined);
+    if (e.pointerType === 'touch' && active.tools.tapOnly) { pendingTap.current = e.pointerId; return; }
+    active.tools.down(e, active.canvas);
   }
   function move(e: PointerEvent<HTMLElement>) {
+    if (!ownsEvent(e)) return;
+    if (pressScope.current !== latest.current.options.scopeKey && (intent.current.current || pointers.current.size || panPointer.current)) { abandon(false, true); return; }
+    intent.current.move(e.pointerId, position(e));
+    const bounds = e.currentTarget.getBoundingClientRect();
+    if (e.clientX < bounds.left || e.clientX > bounds.right || e.clientY < bounds.top || e.clientY > bounds.bottom) intent.current.leave();
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, position(e));
     if (gesture.current && pointers.current.size >= 2) {
       const next = measure(e), base = gesture.current, zoom = clampZoom(base.view.zoom * next.distance / base.distance), ratio = zoom / base.view.zoom;
@@ -66,32 +135,60 @@ export function useCanvasNavigation(tools: Tools, canvas: RefObject<HTMLCanvasEl
       const prev = panPointer.current.point;
       update({ ...current.current, pan: { x: current.current.pan.x + e.clientX - prev.x, y: current.current.pan.y + e.clientY - prev.y } });
       panPointer.current.point = position(e);
-    } else if (!interrupted.current && !panMode) tools.move(e, canvas);
+    } else if (!interrupted.current && !latest.current.panMode) latest.current.tools.move(e, latest.current.canvas);
   }
   function end(e: PointerEvent<HTMLElement>, cancelled = false) {
-    if (cancelled) { tools.cancel(); rollback.current?.(); }
-    else if (!interrupted.current && !panPointer.current) {
-      if (pendingTap.current === e.pointerId) tools.down(e, canvas);
-      tools.up(e);
+    if (!ownsEvent(e)) return;
+    // Releasing the right mouse button must not commit a left-button preview.
+    if (!cancelled && e.button !== 0 && panPointer.current?.id !== e.pointerId) return;
+    intent.current.move(e.pointerId, position(e));
+    const press = intent.current.finish(e.pointerId);
+    const scopeChanged = pressScope.current !== latest.current.options.scopeKey;
+    if (cancelled || scopeChanged) abandon(!scopeChanged);
+    else if (!contextConsumed.current && !interrupted.current && !panPointer.current) {
+      const tap = e.pointerType === 'touch' && latest.current.options.tapContextEnabled && !latest.current.panMode && press && !press.moved && !press.held && contextAllowed();
+      if (tap) openContext(position(e), 'tap');
+      else {
+        if (pendingTap.current === e.pointerId) latest.current.tools.down(e, latest.current.canvas);
+        latest.current.tools.up(e);
+      }
     }
     pendingTap.current = null;
     pointers.current.delete(e.pointerId); gesture.current = null; panPointer.current = null; rollback.current = null;
-    if (!pointers.current.size) interrupted.current = false;
+    if (!pointers.current.size) { interrupted.current = false; contextConsumed.current = false; }
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   }
+  function contextMenu(e: MouseEvent<HTMLElement>) {
+    if (!ownsEvent(e)) return;
+    // A browser can emit its native touch contextmenu after our 500 ms callback
+    // has opened a dialog and disabled new context actions. Still swallow it.
+    if (suppressNativeContext.current) { e.preventDefault(); e.stopPropagation(); return; }
+    if (!contextAllowed()) return;
+    e.preventDefault(); e.stopPropagation();
+    if (suppressNativeContext.current || pointers.current.size > 1 || gesture.current || panPointer.current || (pointers.current.size > 0 && (latest.current.panMode || intent.current.current?.moved))) return;
+    openContext(position(e), 'context');
+  }
   return {
-    ...view, panMode, setPanMode: (value: boolean) => { tools.cancel(); setPanMode(value); },
-    fit: () => update({ zoom: 1, pan: { x: 0, y: 0 } }),
+    ...view, panMode, setPanMode: (value: boolean) => { abandon(true, true); latest.current.panMode = value; setPanMode(value); },
+    fit: () => { abandon(true, true); update({ zoom: 1, pan: { x: 0, y: 0 } }); },
     zoomTo: (zoom: number, anchor: Position = { x: 0, y: 0 }) => {
+      abandon(true, true);
       const next = clampZoom(zoom), previous = current.current;
       update({ zoom: next, pan: { x: anchor.x - (anchor.x - previous.pan.x) * next / previous.zoom, y: anchor.y - (anchor.y - previous.pan.y) * next / previous.zoom } });
     },
     handlers: {
-      onPointerDownCapture: (e: PointerEvent<HTMLElement>) => { if (e.pointerType === 'touch' || panMode) { e.stopPropagation(); down(e); } },
+      onPointerDownCapture: (e: PointerEvent<HTMLElement>) => { if (ownsEvent(e) && (e.pointerType === 'touch' || panMode)) { e.stopPropagation(); down(e); } },
       onPointerDown: down,
       onPointerMove: move,
       onPointerUp: (e: PointerEvent<HTMLElement>) => end(e),
-      onPointerCancel: (e: PointerEvent<HTMLElement>) => end(e, true)
+      onPointerCancel: (e: PointerEvent<HTMLElement>) => end(e, true),
+      onPointerLeave: () => intent.current.leave(),
+      onContextMenu: contextMenu,
+      onClickCapture: (e: MouseEvent<HTMLElement>) => {
+        // A portalled menu may still be a React descendant of the viewport. Only
+        // swallow the touch's synthetic canvas click, never a menu button click.
+        if (suppressClick.current && ownsEvent(e)) { e.preventDefault(); e.stopPropagation(); suppressClick.current = false; }
+      },
     }
   };
 }
