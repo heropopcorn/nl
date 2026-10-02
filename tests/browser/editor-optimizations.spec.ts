@@ -95,7 +95,7 @@ test('deleting another scene preserves the selected shot and protects the final 
   await expect(page.getByLabel('布景名称', { exact: true })).toHaveValue(p.shots[1].name);
   await expect(page.locator('.scene-row').getByRole('button', { name: '删除', exact: true })).toBeDisabled();
 });
-test('static previews stop rendering, live weather resumes and hidden mobile panes suspend it', async ({ page }) => {
+test('static previews stop rendering, mobile drawers keep weather live, and hidden pages suspend it', async ({ page }) => {
   await start(page);
   const preview = page.getByLabel('影棚预览');
   const count = () => preview.getAttribute('data-render-count');
@@ -105,12 +105,20 @@ test('static previews stop rendering, live weather resumes and hidden mobile pan
   await expect.poll(count).not.toBe(first);
   let running = await count(); await expect.poll(count).not.toBe(running);
   await page.setViewportSize({ width: 390, height: 844 });
+  const canvasBox = (await preview.boundingBox())!;
   const nav = page.getByRole('navigation', { name: '工作区切换' });
   await nav.getByRole('button', { name: '属性', exact: true }).click();
-  await page.waitForTimeout(100); const suspended = await count(); await page.waitForTimeout(200);
-  expect(await count()).toBe(suspended);
-  await nav.getByRole('button', { name: '画布', exact: true }).click();
-  await expect.poll(count).not.toBe(suspended);
+  await expect(page.locator('#pane-inspector')).toHaveAttribute('data-open', 'true');
+  await expect(preview).toBeVisible();
+  await expect.poll(async () => {
+    const box = await preview.boundingBox();
+    return box ? Math.max(...(['x', 'y', 'width', 'height'] as const).map(key => Math.abs(box[key] - canvasBox[key]))) : Infinity;
+  }).toBeLessThanOrEqual(1);
+  const behindDrawer = await count(); await expect.poll(count).not.toBe(behindDrawer);
+  await page.getByRole('button', { name: '关闭属性', exact: true }).click();
+  await expect(page.locator('#pane-inspector')).toHaveAttribute('data-open', 'false');
+  await expect(page.locator('#pane-inspector')).toBeHidden();
+  running = await count(); await expect.poll(count).not.toBe(running);
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')); });
   await page.waitForTimeout(100); const hidden = await count(); await page.waitForTimeout(200);
   expect(await count()).toBe(hidden);

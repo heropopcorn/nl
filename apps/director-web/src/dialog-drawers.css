@@ -1,0 +1,63 @@
+/* Dialog sidebars keep their desktop grid positions. On compact screens the
+   shared MobileDrawer supplies placement, focus handling and a backdrop. */
+.resource-dialog .resource-list-drawer, .resource-dialog .sprite-settings-drawer,
+.resource-dialog .review-list-drawer {
+  min-width: 0;
+  min-height: 0;
+}
+.resource-list-drawer .resource-library, .sprite-settings-drawer .sprite-controls,
+.review-list-drawer .review-grid { flex: 1; min-height: 0; }
+.sprite-frames-drawer { min-width: 0; }
+.drawer-inline-trigger, .drawer-feedback { display: none; }
+
+@media (min-width: 1024px) {
+  .resource-dialog .resource-list-drawer, .resource-dialog .sprite-settings-drawer,
+  .resource-dialog .review-list-drawer { display: flex; flex-direction: column; }
+}
+
+@media (max-width: 1023px) {
+  .resource-dialog .drawer-triggers { display: flex; flex-shrink: 0; }
+  .resource-dialog .drawer-triggers button[aria-expanded=true] {
+    background: #275b66;
+    border-color: #58b8b1;
+    color: #efffff;
+  }
+  .resource-dialog .drawer-inline-trigger { display: block; }
+  .resource-dialog .drawer-feedback { display: block; margin: 6px 0 12px; color: #a8d9ce; overflow-wrap: anywhere; }
+  .resource-dialog .drawer-feedback:empty { display: none; }
+  .resource-dialog .resource-drawer-layout > .resource-preview,
+  .resource-dialog .sprite-drawer-layout > .sprite-workspace,
+  .resource-dialog .review-drawer-layout > .review-detail {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+  }
+  .resource-dialog .resource-list-drawer .resource-library,
+  .resource-dialog .sprite-settings-drawer .sprite-controls,
+  .resource-dialog .review-list-drawer .review-grid {
+    overflow: visible;
+    max-height: none;
+    padding: 0;
+  }
+  .resource-dialog .resource-list-drawer .resource-items,
+  .resource-dialog .review-list-drawer .review-grid {
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  }
+  .resource-dialog .sprite-workspace .sprite-previews { flex-shrink: 0; }
+  .resource-dialog .sprite-workspace .sprite-previews .sprite-stage { height: clamp(160px, 38dvh, 340px); }
+  .resource-dialog .sprite-settings-drawer .sprite-controls fieldset { padding: 0; }
+  .resource-dialog .sprite-frames-drawer .sprite-frame-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .resource-dialog .sprite-frame-actions small { flex-basis: 100%; }
+  .resource-dialog .sprite-frames-drawer .sprite-frames {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    padding-bottom: 12px;
+  }
+  .resource-dialog .review-drawer-layout .review-stage { flex-shrink: 0; }
+}

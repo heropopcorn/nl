@@ -126,7 +126,7 @@ export function useCanvasTools({ shot, local, selected, select, change, pause, n
       if (e.key === 'Backspace' && strokeRef.current.length) { e.preventDefault(); strokeRef.current = strokeRef.current.slice(0, -1); setStroke(strokeRef.current); }
       if (actor && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) { e.preventDefault(); const step = e.shiftKey ? 10 : 1, dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0, dy = e.key === 'ArrowDown' ? -step : e.key === 'ArrowUp' ? step : 0; change(s => { const a = s.actors.find(a => a.id === actor.id)!; [a.start, a.end, ...a.route].forEach(p => { p.x += dx; p.y += dy; }); if (a.sortY !== null) a.sortY += dy; }); }
     }; const release = (e: KeyboardEvent) => { held.current.delete(e.key.toLowerCase()); if (!held.current.size) stopWalk.current(); }; const blur = () => stopWalk.current();
-    const focus = (e: FocusEvent) => { if (e.target instanceof HTMLElement && (e.target.isContentEditable || /INPUT|TEXTAREA|SELECT|DIALOG/.test(e.target.tagName) || e.target.closest('dialog'))) stopWalk.current(); };
+    const focus = (e: FocusEvent) => { if (e.target instanceof HTMLElement && (e.target.isContentEditable || /INPUT|TEXTAREA|SELECT|DIALOG/.test(e.target.tagName) || e.target.closest('dialog, [role=dialog][aria-modal=true]'))) stopWalk.current(); };
     const visibility = () => { if (document.hidden) stopWalk.current(); };
     window.addEventListener('keydown', key); window.addEventListener('keyup', release); window.addEventListener('blur', blur);
     window.addEventListener('focusin', focus); document.addEventListener('visibilitychange', visibility);

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { MobileSections } from './ResponsiveLayout';
+import { MobileDrawer } from './ResponsiveLayout';
 import { ResourceDialog } from './ResourceDialog';
 import { CategoryCreator } from './CategoryCreator';
 import { useSpritesheet } from './useSpritesheet';
@@ -13,11 +13,12 @@ import { mediaSchema, type MediaAsset } from '../../../packages/core/media';
 import { downloadBlob } from '../../../packages/spritesheet/images';
 import { spriteDownloadStem } from '../../../packages/spritesheet/spriteFrames';
 import './spritesheet.css';
+import './dialog-drawers.css';
 import { NumberField } from './NumberField';
 
 export function SpritesheetEditor({ project, edit, close, saved, initialCategory }: { project: Project; edit: (fn: (p: Project) => void) => void | boolean; close: () => void; saved: (asset: MediaAsset) => void; initialCategory: string }) {
   const sheet = useSpritesheet(), dragging = useRef<number | null>(null);
-  const [mobileSection, setMobileSection] = useState<'settings' | 'frames'>('settings');
+  const [drawer, setDrawer] = useState<'settings' | 'frames' | null>('settings');
   const [category, setCategory] = useState(initialCategory), [saving, setSaving] = useState(false), [message, setMessage] = useState('');
   const [draftId, setDraftId] = useState(() => crypto.randomUUID() as string), [openId, setOpenId] = useState('');
   const [savedWork, setSavedWork] = useState<(SpriteWork & { category: string }) | null>(null);
@@ -100,10 +101,10 @@ export function SpritesheetEditor({ project, edit, close, saved, initialCategory
     } catch (e) { setMessage(`保存失败：${e instanceof Error ? e.message : String(e)}`); }
     finally { setSaving(false); }
   }
-  return <ResourceDialog title="序列帧制作" close={() => { if (saving || sheet.busy) return; if ((dirty || (local && workspaceState().dirty)) && !confirm(local ? '当前有未保存内容，关闭将丢弃未保存的制作修改。请先保存制作草稿，是否仍要关闭？' : '关闭制作窗口？已保存的资源会保留，当前抽帧工作草稿将丢弃。')) return; close(); }}><div className="sprite-editor" data-mobile-section={mobileSection}>
-    <MobileSections label="序列帧制作分区" value={mobileSection} change={setMobileSection} items={[['settings', '制作 / 保存'], ['frames', '预览 / 帧排序']]}/>
+  return <ResourceDialog title="序列帧制作" close={() => { if (saving || sheet.busy) return; if ((dirty || (local && workspaceState().dirty)) && !confirm(local ? '当前有未保存内容，关闭将丢弃未保存的制作修改。请先保存制作草稿，是否仍要关闭？' : '关闭制作窗口？已保存的资源会保留，当前抽帧工作草稿将丢弃。')) return; close(); }}><div className="sprite-editor sprite-drawer-layout">
+    <nav className="mobile-sections drawer-triggers" aria-label="序列帧制作分区"><button aria-expanded={drawer === 'settings'} aria-controls="sprite-settings-drawer" onClick={() => setDrawer(drawer === 'settings' ? null : 'settings')}>制作 / 保存</button><button aria-label="帧排序" aria-expanded={drawer === 'frames'} aria-controls="sprite-frames-drawer" onClick={() => setDrawer(drawer === 'frames' ? null : 'frames')}>帧排序 · {sheet.frames.length}</button></nav>
     <p className="sprite-feedback" role="status" aria-label="序列帧状态">{message || sheet.status}</p>
-    <div className="sprite-controls" onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }} onDrop={e => { if (e.dataTransfer.files.length) { e.preventDefault(); if (!sheet.busy && !saving) { const f = e.dataTransfer.files[0]; chooseVideo(f); } } }}><fieldset disabled={sheet.busy || saving}>
+    <MobileDrawer id="sprite-settings-drawer" title="制作与保存" side="left" open={drawer === 'settings'} onClose={() => setDrawer(null)} className="sprite-settings-drawer"><div className="sprite-controls" onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }} onDrop={e => { if (e.dataTransfer.files.length) { e.preventDefault(); if (!sheet.busy && !saving) { const f = e.dataTransfer.files[0]; chooseVideo(f); } } }}><p className="drawer-feedback" aria-live="polite">{message || sheet.status}</p><fieldset disabled={sheet.busy || saving}>
       {local ? <><h3>本地制作草稿</h3><small>视频、帧文件、成品写入工作目录，不上传云端。修改后请保存草稿。</small>
         <label>已有制作草稿<select value={openId} onChange={e=>setOpenId(e.target.value)}><option value="">请选择草稿</option>{project.spriteDrafts.map(d=><option key={d.id} value={d.id}>{d.name} · {d.frames.length} 帧 · {new Date(d.updatedAt).toLocaleString()}</option>)}</select></label>
         <button disabled={!openId} onClick={openDraft}>打开制作草稿</button><button disabled={!openId} onClick={removeDraft}>移除制作草稿</button>
@@ -130,11 +131,11 @@ export function SpritesheetEditor({ project, edit, close, saved, initialCategory
       <h3>保存到自定义资源</h3><label>保存分类<select value={category} onChange={e => setCategory(e.target.value)}><option value="">请选择分类</option>{project.resourceCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
       <CategoryCreator project={project} edit={edit} created={setCategory}/>
       <button disabled={!sheet.packed || !category} onClick={save}>{saving ? '正在保存…' : '保存到自定义分类'}</button>
-    </fieldset></div>
+    </fieldset></div></MobileDrawer>
     <div className="sprite-workspace"><div className="sprite-previews"><section><h3>动画预览 · {sheet.active.length} / {sheet.frames.length} 帧</h3><div className="sprite-stage">{preview && <img alt="当前序列帧" src={preview.previewUrl}/>}</div><button onClick={() => sheet.setPlaying(!sheet.playing)} disabled={sheet.active.length < 2}>{sheet.playing ? '暂停预览' : '播放预览'}</button></section><section><h3>合成图集</h3><div className="sprite-stage">{sheet.packed ? <img alt="合成序列帧" src={sheet.packed.url}/> : <p>编辑帧后请重新合成</p>}</div>{sheet.packed && <small>{sheet.packed.layout.sheetWidth} × {sheet.packed.layout.sheetHeight} · {sheet.packed.layout.cells.length} 帧</small>}</section></div>
-    <div><button disabled={sheet.busy || saving} onClick={() => sheet.enableAll(true)}>全部启用</button><button disabled={sheet.busy || saving} onClick={() => sheet.enableAll(false)}>全部禁用</button><small>拖动排序，或使用前移／后移</small></div>
+    <MobileDrawer id="sprite-frames-drawer" title="帧排序" side="bottom" open={drawer === 'frames'} onClose={() => setDrawer(null)} className="sprite-frames-drawer"><div className="sprite-frame-actions"><button disabled={sheet.busy || saving} onClick={() => sheet.enableAll(true)}>全部启用</button><button disabled={sheet.busy || saving} onClick={() => sheet.enableAll(false)}>全部禁用</button><small>拖动排序，或使用前移／后移；点击帧可回到预览</small></div>
     <div className="sprite-frames">{sheet.frames.map((f, i) => <article key={f.id} className={`${f.enabled ? '' : 'disabled'} ${sheet.selected === f.id ? 'selected' : ''}`} draggable={!sheet.busy && !saving} onDragStart={() => { dragging.current = i; }} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); if (!sheet.busy && !saving && dragging.current !== null) sheet.reorder(dragging.current, i); dragging.current = null; }}>
-      <button onClick={() => { sheet.setSelected(f.id); sheet.setPlaying(false); }}><img src={f.previewUrl} alt={`帧 ${i + 1}`}/></button><label className="check"><input type="checkbox" aria-label={`启用帧 ${i + 1}`} checked={f.enabled} disabled={sheet.busy || saving} onChange={e => sheet.toggle(f.id, e.target.checked)}/>#{i + 1} · {f.time.toFixed(2)}s</label><button disabled={sheet.busy || saving || i === 0} onClick={() => sheet.reorder(i, i - 1)}>前移</button><button disabled={sheet.busy || saving || i === sheet.frames.length - 1} onClick={() => sheet.reorder(i, i + 1)}>后移</button>
-    </article>)}</div></div>
+      <button onClick={() => { sheet.setSelected(f.id); sheet.setPlaying(false); setDrawer(null); }}><img src={f.previewUrl} alt={`帧 ${i + 1}`}/></button><label className="check"><input type="checkbox" aria-label={`启用帧 ${i + 1}`} checked={f.enabled} disabled={sheet.busy || saving} onChange={e => sheet.toggle(f.id, e.target.checked)}/>#{i + 1} · {f.time.toFixed(2)}s</label><button disabled={sheet.busy || saving || i === 0} onClick={() => sheet.reorder(i, i - 1)}>前移</button><button disabled={sheet.busy || saving || i === sheet.frames.length - 1} onClick={() => sheet.reorder(i, i + 1)}>后移</button>
+    </article>)}</div>{!sheet.frames.length && <p className="muted">暂无帧，请先在“制作 / 保存”中选择视频并抽帧。</p>}</MobileDrawer></div>
   </div></ResourceDialog>;
 }

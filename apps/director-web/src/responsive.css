@@ -50,6 +50,9 @@ legend { max-width: 100%; white-space: normal; }
 .workspace-dialog fieldset label { width: auto; }
 .sprite-editor { grid-template-rows: auto minmax(0, 1fr); }
 .sprite-feedback { grid-column: 1 / -1; margin: 4px 0; overflow-wrap: anywhere; }
+.mobile-drawer-content, .inspector-content { display: contents; }
+.mobile-drawer-heading, .mobile-drawer-backdrop { display: none; }
+.right .inspector-content > button { width: 100%; margin-bottom: 8px; }
 
 @media (min-width: 1024px) and (max-height: 760px) {
   .app { min-height: 500px; grid-template-rows: 56px minmax(200px, 1fr) 150px 26px; }
@@ -94,12 +97,21 @@ legend { max-width: 100%; white-space: normal; }
   .header-actions a { display: flex; align-items: center; min-height: 44px; justify-content: center; }
   .mobile-menu-close { display: block; }
   .menu-backdrop { position: fixed; inset: 0; z-index: 90; background: #050b1499; }
-  .app > main, .app > .left, .app > .right, .app > .scene-browser { grid-column: 1; grid-row: 2; min-width: 0; min-height: 0; }
-  .app > main, .app > .left, .app > .right, .app > .scene-browser { display: none; }
-  .app[data-mobile-pane=canvas] > main { display: flex; }
-  .app[data-mobile-pane=elements] > .left, .app[data-mobile-pane=resources] > .left, .app[data-mobile-pane=inspector] > .right { display: block; }
-  .app[data-mobile-pane=elements] .resource-pane, .app[data-mobile-pane=resources] .hierarchy { display: none; }
-  .app > aside { border: 0; padding: 16px max(16px, env(safe-area-inset-right)) 24px max(16px, env(safe-area-inset-left)); overflow-y: auto; overscroll-behavior: contain; }
+  .app > main { display: flex; grid-column: 1; grid-row: 2; min-width: 0; min-height: 0; }
+  .mobile-drawer { display: none; position: fixed; z-index: 101; min-width: 0; min-height: 0; margin: 0; padding: 0; background: #19212d; border: 1px solid #44596e; overflow: hidden; box-shadow: 0 0 32px #0008; }
+  .mobile-drawer[data-open=true] { display: flex; flex-direction: column; }
+  .mobile-drawer[data-side=left], .mobile-drawer[data-side=right] { top: 0; bottom: 0; width: min(380px, calc(100% - 48px)); height: 100dvh; padding-top: env(safe-area-inset-top); }
+  .mobile-drawer[data-side=left] { left: 0; border-left: 0; border-radius: 0 14px 14px 0; padding-left: env(safe-area-inset-left); }
+  .mobile-drawer[data-side=right] { right: 0; border-right: 0; border-radius: 14px 0 0 14px; padding-right: env(safe-area-inset-right); }
+  .mobile-drawer[data-side=bottom] { inset: auto 0 0; width: 100%; height: min(680px, 78dvh); border-bottom: 0; border-radius: 16px 16px 0 0; padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); }
+  .mobile-drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 0 0 auto; min-height: 60px; padding: 8px 12px 8px 16px; border-bottom: 1px solid #344b60; background: #202d3c; }
+  .mobile-drawer-heading strong { min-width: 0; font-size: 16px; overflow-wrap: anywhere; }
+  .mobile-drawer-heading button { flex-shrink: 0; font-size: 14px; }
+  .mobile-drawer > .mobile-drawer-content { display: block; flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); }
+  .mobile-drawer-backdrop, .mobile-drawer-backdrop:hover { display: block; position: fixed; z-index: 100; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; border-radius: 0; background: #050b146b; cursor: pointer; touch-action: manipulation; }
+  .drawer-shortcuts { position: sticky; top: -16px; z-index: 2; margin: -16px -16px 12px; padding: 8px 12px; background: #19212d; border-bottom: 1px solid #344152; }
+  #pane-elements, #pane-resources { scroll-margin-top: 64px; }
+  #pane-resources { margin-top: 24px; padding-top: 18px; border-top: 1px solid #344152; }
   .left .row, .environment-row .row { padding: 10px; font-size: 15px; }
   .left .environment-list { margin-top: 18px; padding-top: 16px; }
   .environment-row { gap: 6px; }
@@ -125,12 +137,13 @@ legend { max-width: 100%; white-space: normal; }
   .transport { gap: 6px 10px; padding: 6px 12px; }
   .transport .live-badge { font-size: 11px; }
   .transport small { flex: 1; font-size: 11px; }
-  .mobile-inspect { display: block; margin-left: auto; font-size: 13px; }
+  .mobile-inspect { display: block; margin-left: auto; font-size: 13px; min-width: 120px; white-space: nowrap; }
   .mobile-navigation { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-column: 1; grid-row: 4; gap: 4px; padding: 6px max(8px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: #172330; border-top: 1px solid #35495c; }
   .mobile-navigation button { min-width: 0; background: transparent; border-color: transparent; font-size: 14px; }
+  .drawer-direction { display: block; color: #8dd4ca; font-size: 13px; line-height: 16px; }
   .mobile-navigation button[aria-pressed=true], .mobile-sections button[aria-pressed=true] { background: #275b66; border-color: #58b8b1; color: #efffff; }
   .app > footer { grid-column: 1; grid-row: 3; min-height: 26px; max-height: 48px; overflow: auto; padding: 5px max(12px, env(safe-area-inset-left)); overflow-wrap: anywhere; }
-  .app[data-mobile-pane=scenes] > .scene-browser { display: block; overflow-y: auto; overscroll-behavior: contain; padding: 0 max(0px, env(safe-area-inset-right)) 12px max(0px, env(safe-area-inset-left)); }
+  .scene-browser > .mobile-drawer-content { padding-inline: 0; padding-top: 0; }
   .project-tree { width: 100%; padding: 16px; border-right: 0; border-bottom: 1px solid #344152; overflow: visible; font-size: 14px; }
   .project-tree > button { margin: 10px 0; }
   .project-tree .button-row { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -167,7 +180,6 @@ legend { max-width: 100%; white-space: normal; }
   .mobile-sections button { flex: 1; font-size: 14px; }
   .resource-browser-body { display: flex; flex-direction: column; gap: 0; overflow: hidden; }
   .resource-dialog .resource-library { padding: 8px 0 16px; }
-  .resource-browser-body[data-mobile-section=list] .resource-preview, .resource-browser-body[data-mobile-section=preview] .resource-library { display: none; }
   .resource-preview { flex: 1; padding: 12px 0; border: 0; overflow-y: auto; }
   .resource-preview h3 { margin: 0 0 12px; }
   .resource-preview > img { flex: 1; min-height: 100px; }
@@ -178,7 +190,6 @@ legend { max-width: 100%; white-space: normal; }
   .sprite-controls, .sprite-workspace { flex: 1; min-height: 0; overscroll-behavior: contain; padding-bottom: 16px; }
   .sprite-controls fieldset { padding: 0; }
   .sprite-controls label { width: 100%; }
-  .sprite-editor[data-mobile-section=settings] .sprite-workspace, .sprite-editor[data-mobile-section=frames] .sprite-controls { display: none; }
   .sprite-previews { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .sprite-stage { height: 160px; }
   .sprite-previews h3 { font-size: 13px; }
@@ -194,7 +205,6 @@ legend { max-width: 100%; white-space: normal; }
   .review-panel .mobile-sections { padding: 0; }
   .review-body { display: flex; flex-direction: column; overflow: hidden; }
   .review-grid, .review-detail { flex: 1; min-height: 0; max-height: none; overflow-y: auto; }
-  .review-body[data-mobile-section=list] .review-detail, .review-body[data-mobile-section=preview] .review-grid { display: none; }
   .review-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
   .review-stage { height: clamp(160px, 36dvh, 460px); }
   .review-actions { flex-wrap: wrap; }
@@ -212,7 +222,7 @@ legend { max-width: 100%; white-space: normal; }
 @media (max-width: 1023px) and (max-height: 500px) and (orientation: landscape) {
   .app { grid-template-columns: calc(66px + env(safe-area-inset-left)) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
   .app-header { grid-column: 1 / -1; padding-block: 4px; }
-  .app > main, .app > .left, .app > .right, .app > .scene-browser { grid-column: 2; }
+  .app > main { grid-column: 2; }
   .app > footer { grid-column: 2; }
   .mobile-navigation { grid-column: 1; grid-row: 2 / 4; grid-template-columns: 1fr; grid-template-rows: repeat(5, minmax(44px, 1fr)); gap: 2px; padding: 4px 4px max(4px, env(safe-area-inset-bottom)) max(4px, env(safe-area-inset-left)); border-top: 0; border-right: 1px solid #344152; overflow: auto; }
   .mobile-navigation button { padding: 4px; }

@@ -1,11 +1,12 @@
 import { NumberField } from './NumberField';
-import { MobileSections } from './ResponsiveLayout';
+import { MobileDrawer } from './ResponsiveLayout';
 import { availableAsset, isLocalWork } from './runtime';
 import { SpritesheetEditor } from './SpritesheetEditor';
 import { CategoryCreator } from './CategoryCreator';
 import { ResourceDialog } from './ResourceDialog';
 import { useEffect, useRef, useState } from 'react';
 import './resources.css';
+import './dialog-drawers.css';
 import { actorSchema, type Project, type Shot } from '../../../packages/core';
 import { builtinAssets, object3dSchema, type MediaAsset } from '../../../packages/core/media';
 import type { BackgroundManifest } from '../../../packages/core/backgrounds';
@@ -18,7 +19,7 @@ export function ResourceLibrary({ project, shot, edit, select, notify, manifest 
   const folder = custom ? project.resourceCategories.find(c => c.id === category) : undefined;
   const mediaCategory: MediaAsset['category'] = folder ? 'characters' : (['backgrounds', 'trees', 'characters', 'houses', 'audio', 'models'].includes(category) ? category as MediaAsset['category'] : 'characters');
   const [expanded, setExpanded] = useState(false);
-  const [mobileSection, setMobileSection] = useState<'list' | 'preview'>('list');
+  const [listOpen, setListOpen] = useState(false);
   const [choice, setPreview] = useState<ResourceChoice | null>(null);
   const [applying, setApplying] = useState(false);
   const [message, setMessage] = useState('');
@@ -45,7 +46,7 @@ export function ResourceLibrary({ project, shot, edit, select, notify, manifest 
     if (edit(change) === false) { setMessage('未应用：请检查参数或当前操作状态，详情见编辑器底部提示'); return false; }
     report(success); return true;
   }
-  const choose = (item: ResourceChoice) => { setMessage(''); if (expanded) { setPreview(item); setMobileSection('preview'); } else void run(() => place(item)); };
+  const choose = (item: ResourceChoice) => { setMessage(''); if (expanded) { setPreview(item); setListOpen(false); } else void run(() => place(item)); };
   async function place(item: ResourceChoice) {
     const target = latest.current.shot, asset = item.kind === 'asset' ? findAsset(item.id, latest.current.project) : undefined;
     if (item.kind === 'asset' && !asset) throw new Error('此资源已删除，请重新选择');
@@ -98,8 +99,9 @@ export function ResourceLibrary({ project, shot, edit, select, notify, manifest 
       p.assets.push(...imported);
     }, `已上传 ${imported.length} 个资源；点击缩略图可应用到场景`)) { setCustom(true); setCategory(category); setSearch(''); }
   }
-  const content = <section className="resources resource-library"><h2>资源库 · {assets.length + backgrounds.length} 项</h2>{!expanded && <button className="more-resources" onClick={() => { setPreview(null); setMobileSection('list'); setExpanded(true); }}>更多资源…</button>}<div className="button-row"><button className={!custom ? 'active' : ''} onClick={() => { setCustom(false); if (folder) setCategory('backgrounds'); }}>默认资源</button><button className={custom ? 'active' : ''} onClick={() => setCustom(true)}>自定义资源</button></div><label>资源分类<select value={category} onChange={e => setCategory(e.target.value as typeof category)}><option value="backgrounds">背景图</option><optgroup label="道具资源"><option value="trees">树木 / 花草</option><option value="characters">角色</option><option value="houses">房屋 / 道具</option><option value="models">3D 模型（GLB）</option></optgroup><optgroup label="其他资源"><option value="audio">音频</option></optgroup>{custom && <optgroup label="自定义分类">{project.resourceCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>}</select></label>{custom && <><CategoryCreator project={project} edit={edit} created={setCategory}/><button className="more-resources" disabled={applying} onClick={() => setMakingSprite(true)}>制作序列帧</button></>}<input aria-label="搜索资源" placeholder="搜索资源…" value={search} onChange={e => setSearch(e.target.value)}/>{custom && <label className="button">上传{category === 'audio' ? '音频' : category === 'models' ? '模型' : '图片'}<input aria-label="上传自定义资源" type="file" hidden accept={category === 'audio' ? 'audio/*' : category === 'models' ? '.glb' : 'image/png,image/jpeg,image/webp'} multiple disabled={applying} onChange={e => { const files = [...(e.target.files ?? [])]; e.target.value = ''; if (files.length) void run(() => upload(files)); }}/></label>}
+  const content = <section className="resources resource-library"><h2>资源库 · {assets.length + backgrounds.length} 项</h2>{!expanded && <button className="more-resources" onClick={() => { setPreview(null); setListOpen(true); setExpanded(true); }}>更多资源…</button>}<div className="button-row"><button className={!custom ? 'active' : ''} onClick={() => { setCustom(false); if (folder) setCategory('backgrounds'); }}>默认资源</button><button className={custom ? 'active' : ''} onClick={() => setCustom(true)}>自定义资源</button></div><label>资源分类<select value={category} onChange={e => setCategory(e.target.value as typeof category)}><option value="backgrounds">背景图</option><optgroup label="道具资源"><option value="trees">树木 / 花草</option><option value="characters">角色</option><option value="houses">房屋 / 道具</option><option value="models">3D 模型（GLB）</option></optgroup><optgroup label="其他资源"><option value="audio">音频</option></optgroup>{custom && <optgroup label="自定义分类">{project.resourceCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>}</select></label>{custom && <><CategoryCreator project={project} edit={edit} created={setCategory}/><button className="more-resources" disabled={applying} onClick={() => setMakingSprite(true)}>制作序列帧</button></>}<input aria-label="搜索资源" placeholder="搜索资源…" value={search} onChange={e => setSearch(e.target.value)}/>{custom && <label className="button">上传{category === 'audio' ? '音频' : category === 'models' ? '模型' : '图片'}<input aria-label="上传自定义资源" type="file" hidden accept={category === 'audio' ? 'audio/*' : category === 'models' ? '.glb' : 'image/png,image/jpeg,image/webp'} multiple disabled={applying} onChange={e => { const files = [...(e.target.files ?? [])]; e.target.value = ''; if (files.length) void run(() => upload(files)); }}/></label>}
     {!expanded && message && <p className="resource-feedback" aria-live="polite">{message}</p>}
+    {expanded && message && <p className="drawer-feedback" aria-live="polite">{message}</p>}
     <div className="resource-items">
     {backgrounds.slice(0, expanded ? undefined : 6).map(([bg, name]) => <button className="asset" key={bg} title={name} disabled={applying || (!expanded && shot.studio !== 'pixi')} onClick={() => choose({ kind: 'background', id: bg })}><img alt="" src={backgroundSrc(bg)}/><span>{name}</span></button>)}
     {assets.slice(0, expanded ? undefined : Math.max(0, 6 - backgrounds.length)).map(a => <div key={a.id}><button className="asset" title={a.name} disabled={applying} onClick={() => choose({ kind: 'asset', id: a.id })}>{!['audio', 'models'].includes(a.category) && <img src={a.src} alt="" loading="lazy"/>}<span>{a.name}</span></button>{custom && a.category === 'characters' && !a.frameRects && <div className="sprite-settings">{(['columns', 'rows', 'fps'] as const).map(key => <label key={key}>{({ columns: '帧列', rows: '帧行', fps: '动画 FPS' })[key]}<NumberField  min="1" max={key === 'fps' ? 60 : 64} value={a[key]} onValueChange={value => edit(p => { p.assets.find(asset => asset.id === a.id)![key] = value; })}/></label>)}</div>}{custom && <button disabled={applying} onClick={() => { const used = project.shots.some(s => s.backgroundAssetId === a.id || Object.values(s.backgroundVersions).includes(a.id) || (s.actors.some(actor => actor.assetId === a.id) || s.objects3d.some(o => o.assetId === a.id))) || project.audioTracks.some(t => t.assetId === a.id) || project.sets.some(s => s.content.backgroundAssetId === a.id || (s.content.actors.some(actor => actor.assetId === a.id) || s.content.objects3d.some(o => o.assetId === a.id)) || Object.values(s.content.backgroundVersions).includes(a.id)); if (used) report('资源仍被镜头、音轨或布景引用，不能删除'); else if (confirm('删除此自定义资源？可通过撤销恢复。')) { if (commit(p => { p.assets = p.assets.filter(asset => asset.id !== a.id); }, '资源已删除，可撤销恢复') && choice?.id === a.id) setPreview(null); } }}>删除资源</button>}</div>)}
@@ -109,9 +111,9 @@ export function ResourceLibrary({ project, shot, edit, select, notify, manifest 
     {!custom && category === 'backgrounds' && <p className="muted">点击替换背景；时节在右侧属性中调整。</p>}
   </section>;
   if (makingSprite) return <SpritesheetEditor project={project} edit={edit} close={() => setMakingSprite(false)} initialCategory={folder?.id ?? ''} saved={asset => { setCustom(true); setCategory(asset.customCategoryId!); setSearch(''); setPreview(null); notify('序列帧已保存到自定义资源'); }}/>;
-  return expanded ? <ResourceDialog closeDisabled={applying} close={() => setExpanded(false)}><MobileSections label="资源浏览分区" value={mobileSection} change={setMobileSection} items={[['list', '资源列表'], ['preview', '大图预览']]}/><div className="resource-browser-body" data-mobile-section={mobileSection}>{content}<section className="resource-preview" aria-label="资源大图预览">
+  return expanded ? <ResourceDialog closeDisabled={applying} close={() => setExpanded(false)}><nav className="mobile-sections drawer-triggers" aria-label="资源浏览分区"><button aria-expanded={listOpen} aria-controls="resource-list-drawer" onClick={() => setListOpen(!listOpen)}>资源列表</button></nav><div className="resource-browser-body resource-drawer-layout"><MobileDrawer id="resource-list-drawer" title="资源列表" side="left" open={listOpen} onClose={() => setListOpen(false)} className="resource-list-drawer">{content}</MobileDrawer><section className="resource-preview" aria-label="资源大图预览">
     {preview ? <><h3>{preview.name}</h3>{!['audio', 'models'].includes(preview.category) ? <img src={preview.src} alt={preview.name}/> : preview.category === 'audio' ? <audio controls src={preview.src}/> : <p>GLB 模型，应用后在 3D 影棚查看。</p>}
     {preview.src.startsWith('/art/nl_asset_') && <p className="muted">原始建筑／道具图：保留原图底色，多件素材尚未拆分，应用时作为整图放置。</p>}
-    <button disabled={applying || (preview.category === 'models' ? shot.studio !== 'three' : preview.category !== 'audio' && shot.studio !== 'pixi')} onClick={() => { if (choice) void run(() => place(choice)); }}>{applying ? '正在应用…' : '应用到场景'}</button></> : <p>选择左侧缩略图查看大图</p>}
+    <button disabled={applying || (preview.category === 'models' ? shot.studio !== 'three' : preview.category !== 'audio' && shot.studio !== 'pixi')} onClick={() => { if (choice) void run(() => place(choice)); }}>{applying ? '正在应用…' : '应用到场景'}</button></> : <><p>选择资源列表中的缩略图查看大图</p><button className="drawer-inline-trigger" aria-expanded={listOpen} aria-controls="resource-list-drawer" onClick={() => setListOpen(true)}>选择资源</button></>}
   </section></div>{message && <p className="resource-feedback" aria-live="polite">{message}</p>}</ResourceDialog> : content;
 }
