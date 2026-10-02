@@ -9,12 +9,12 @@ import { ResourceReview } from './ResourceReview';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BackupPanel } from './BackupPanel';
 import { createRoot } from 'react-dom/client';
-import { sample, projectSchema, locate, shotSchema, type Project } from '../../../packages/core';
+import { sample, projectSchema, locate, shotSchema, effectSchema, type Effect, type Project } from '../../../packages/core';
 import { LiveEffectClock } from '../../../packages/studios/live-clock';
 import { DirectorRenderer } from '../../../packages/studios';
 import './style.css';
 import './environment.css';
-import { CollisionOverlay, EnvironmentList, EnvironmentInspector, SelectionOverlay, WaterOverlapOverlay } from './EnvironmentPanel';
+import { CollisionOverlay, EnvironmentList, EnvironmentInspector, SelectionOverlay, WaterOverlapOverlay, effectNames } from './EnvironmentPanel';
 import { BackgroundPanel, ResolutionPicker } from './BackgroundPanel';
 import { ResourceLibrary } from './ResourceLibrary';
 import { useCanvasTools } from './CanvasTools';
@@ -22,7 +22,11 @@ import { ProjectTree, ExtendedInspector } from './ProjectPanels';
 import { hasPendingSaves, loadProject, markProjectDirty, saveProject } from './storage';
 import { LegacyImport } from './LegacyImport';
 import { backgroundKey, resolveBackground, type BackgroundManifest, type Quality } from '../../../packages/core/backgrounds';
-import { overlappingWaterIds } from '../../../packages/core/geometry';
+import { clientToLogical, overlappingWaterIds, regionPoints, type Point } from '../../../packages/core/geometry';
+import { imageLocal } from '../../../packages/core/handles';
+import { actorPosition } from '../../../packages/core/routes';
+import { hitRegions, getRegion, deleteRegion, type RegionHit, type RegionEffectType } from './region-actions';
+import { CanvasContextMenu, type RegionAction, type RegionShape } from './CanvasContextMenu';
 import { HeaderMenu, MobileDrawer, WorkspaceNavigation, useCompactLayout, type WorkspacePane } from './ResponsiveLayout';
 import { useCanvasNavigation } from './useCanvasNavigation';
 import './responsive.css';
@@ -30,6 +34,8 @@ import { useProjectDocument } from './useProjectDocument';
 import { SaveIndicator } from './SaveIndicator';
 
 const STORAGE = 'yuanli.web-director.v1';
+type RegionMenu = { shotId: string; anchor: Point; hits: RegionHit[]; target: string };
+type PendingRegionAction = { shotId: string; id: string; hit?: RegionHit; action: Exclude<RegionAction, 'delete'> | 'create'; draft?: Effect; shape?: RegionShape };
 function download(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob), a = document.createElement('a');
   a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -41,7 +47,10 @@ function App() {
   const compact = useCompactLayout(), pageVisible = usePageVisibility();
   const [rendererRevision, retryRenderer] = useState(0), [renderRevision, retryRender] = useState(0);
   const [pane, setPane] = useState<WorkspacePane>('canvas');
-  const mobileHelp = '手机操作：画布始终保留，元素和资源从左侧抽屉打开，属性从右侧打开，章节与场景从底部打开。点收起或遮罩返回画布，选择元素、切换场景或启动绘制后自动收起。单指使用当前工具，双指缩放和平移画布；平移画布按钮支持单指移动视图，适应画布复位。图片缩放请拖四角，旋转请拖选框外圈。套索逐点点击后按闭合范围；路线或水流导线逐点点击后按完成线段。文件、编辑、备份和导入导出在菜单中；请定期导出备份。';
+  const [regionMenu, setRegionMenu] = useState<RegionMenu | null>(null);
+  const [pendingRegionAction, setPendingRegionAction] = useState<PendingRegionAction | null>(null);
+  const drawingDraft = useRef(false);
+  const mobileHelp = '手机操作：画布始终保留，元素和资源从左侧抽屉打开，属性从右侧打开，章节与场景从底部打开。点收起或遮罩返回画布，选择元素、切换场景或启动绘制后自动收起。2D画布长按约半秒，或点新建区域，可新建水流、雾气、雨雪等范围；移动工具下轻点已有区域可编辑、重绘或删除这一块，重叠区域在菜单中切换，误删可用顶部菜单的撤销恢复。选择套索后沿边界逐点点击，再点闭合范围；矩形则按住拖动。取消绘制不会创建空元素。单指使用当前工具，双指缩放和平移画布；平移画布按钮支持单指移动视图，适应画布复位。图片缩放请拖四角，旋转请拖选框外圈。路线或水流导线逐点点击后按完成线段。文件、编辑、备份和导入导出在菜单中；请定期导出备份。';
   useEffect(() => { if (!compact) setPane('canvas'); }, [compact]);
   useEffect(() => {
     if (!compact || (pane !== 'elements' && pane !== 'resources')) return;
@@ -50,7 +59,7 @@ function App() {
   }, [compact, pane]);
   const [collisionDebug, setCollisionDebug] = useState(false);
   useEffect(() => {
-    const guard = (event: BeforeUnloadEvent) => { if (hasPendingSaves() || editGate.current.fileBusy) { event.preventDefault(); event.returnValue = ''; } };
+    const guard = (event: BeforeUnloadEvent) => { if (hasPendingSaves() || editGate.current.fileBusy || drawingDraft.current) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', guard); return () => window.removeEventListener('beforeunload', guard);
   }, []);
   const [hydrated, setHydrated] = useState(false);
@@ -82,7 +91,12 @@ function App() {
   useEffect(() => { if (selected && ![...shot.actors, ...shot.effects, ...shot.objects3d].some(item => item.id === selected)) { updateSelected(''); selectRegion(null); } }, [selected, shot.actors, shot.effects, shot.objects3d]);
   const envProps = { shot, selected, activeRegion, selectRegion, select: setSelected, change: (fn: (s: typeof shot) => void) => edit(p => { const target = p.shots.find(s => s.id === shot.id); if (!target) throw new Error('当前布景已删除，请重新选择'); fn(target); }) };
   const tools = useCanvasTools({ ...envProps, local, pause: () => setPlaying(false), notify: setStatus, locked: playing || !hydrated || fileBusy || exporting, playing });
-  const navigation = useCanvasNavigation(tools, canvas);
+  drawingDraft.current = tools.hasDraft || tools.creating;
+  const contextEnabled = shot.studio === 'pixi' && ready && hydrated && !loading && !playing && !fileBusy && !exporting && (!compact || pane === 'canvas');
+  const navigation = useCanvasNavigation(tools, canvas, {
+    contextEnabled: contextEnabled && !regionMenu, tapContextEnabled: tools.tool === 'move' && !tools.hasDraft && !tools.creating,
+    scopeKey: `${shot.id}:${pane}:${tools.tool}`, onContextMenu: openRegionMenu,
+  });
   const { zoom, pan } = navigation;
   function showCanvas() { setPane('canvas'); }
   function showLeftSection(section: 'elements' | 'resources') {
@@ -94,6 +108,67 @@ function App() {
     if (content) content.scrollTop = 0;
   }, [shot.id, selected]);
   function selectFromList(id: string) { setSelected(id); showCanvas(); }
+  function openRegionMenu(anchor: Point, source: 'context' | 'tap') {
+    if (!contextEnabled || document.querySelector('dialog[open]') || !canvas.current) return;
+    const rect = canvas.current.getBoundingClientRect(), point = clientToLogical(anchor, rect);
+    if (!point) return;
+    const current = editor.current().shots.find(s => s.id === shot.id);
+    if (!current) return;
+    // A tap on a picture still selects the picture; long-press/right-click can
+    // reach environmental regions underneath it via the overlap chooser.
+    const shown = tools.display ?? current;
+    if (source === 'tap' && shown.actors.some(actor => {
+      if (!actor.enabled) return false;
+      const p = imageLocal(actor, actorPosition(actor, shown, local), point);
+      return Math.abs(p.x) <= actor.width / 2 && p.y >= 0 && p.y <= actor.height;
+    })) return;
+    const scale = Math.min(rect.width / 1280, rect.height / 720);
+    const hits = hitRegions(current, point, 6 * 1024 / 720 / Math.max(scale, 0.001));
+    if (source === 'tap' && !hits.length) return;
+    setRegionMenu({ shotId: shot.id, anchor, hits, target: hits[0] ? `${hits[0].effectId}:${hits[0].index}` : '' });
+  }
+  const menuHit = regionMenu?.hits.find(hit => `${hit.effectId}:${hit.index}` === regionMenu.target);
+  const menuRegion = regionMenu?.shotId === shot.id && menuHit ? getRegion(shot, menuHit) : null;
+  const abandonDraft = () => !(tools.hasDraft || tools.creating) || confirm('当前有未完成的绘制。继续此操作会放弃草稿，是否继续？');
+  function createCanvasRegion(type: RegionEffectType, shape: RegionShape) {
+    if (!contextEnabled || regionMenu?.shotId !== shot.id || !abandonDraft()) return;
+    tools.choose('move'); navigation.setPanMode(false); setSelected(''); showCanvas();
+    const draft = effectSchema.parse({ id: crypto.randomUUID(), type, name: `${effectNames[type]} ${shot.effects.filter(e => e.type === type).length + 1}`, regions: [] });
+    setPendingRegionAction({ shotId: shot.id, id: '', action: 'create', draft, shape });
+  }
+  function actOnRegion(action: RegionAction) {
+    if (!contextEnabled || !regionMenu || regionMenu.shotId !== shot.id || !menuHit) return;
+    const current = editor.current().shots.find(s => s.id === regionMenu.shotId);
+    if (!current || !getRegion(current, menuHit)) { setStatus('此范围已改变或被删除，请重新选择'); return; }
+    if (!abandonDraft()) return;
+    tools.choose('move'); navigation.setPanMode(false); showCanvas();
+    if (action === 'delete') {
+      if (edit(p => { const current = p.shots.find(s => s.id === regionMenu.shotId); if (!current) throw new Error('布景已改变，请重新选择'); deleteRegion(current, menuHit); })) {
+        setSelected(menuHit.effectId); selectRegion(null); setStatus(`已删除${menuHit.name}的区域 ${menuHit.index + 1}，其他范围保留；可撤销`);
+      }
+    } else {
+      setSelected(menuHit.effectId); selectRegion(menuHit.index);
+      setPendingRegionAction({ shotId: shot.id, id: menuHit.effectId, hit: menuHit, action });
+    }
+  }
+  useEffect(() => {
+    if (!contextEnabled) setRegionMenu(null);
+  }, [contextEnabled, shot.id]);
+  useEffect(() => { setRegionMenu(null); setPendingRegionAction(null); }, [shot.id]);
+  useEffect(() => {
+    const next = pendingRegionAction;
+    if (!next) return;
+    setPendingRegionAction(null);
+    if (!contextEnabled || next.shotId !== shot.id || next.id !== selected) return;
+    if (next.action === 'create' && next.draft) { tools.beginRegion(next.draft, next.shape); return; }
+    if (!next.hit || !getRegion(shot, next.hit)) { setStatus('此范围已改变，请重新选择'); return; }
+    selectRegion(next.hit.index);
+    if (next.action === 'properties') { setPane('inspector'); requestAnimationFrame(() => document.querySelector('.active-region')?.scrollIntoView({ block: 'center' })); }
+    else if (next.action === 'redraw') tools.startRegion(next.hit.index);
+    else if (next.action === 'add') tools.startRegion();
+    else if (next.action === 'move') tools.moveRegion(next.hit.index);
+    else if (next.action !== 'create') tools.choose(next.action);
+  }, [pendingRegionAction, selected, shot.id]);
   const displayProject = tools.display ? { ...project, shots: project.shots.map(s => s.id === shot.id ? tools.display! : s) } : project;
   const sceneThumb = (sceneId: string) => {
     const sceneShot = project.shots.find(s => s.sceneId === sceneId && s.studio === 'pixi');
@@ -199,6 +274,7 @@ function App() {
     </MobileDrawer>
     <main id="pane-canvas" aria-label="画布编辑">
       <div className="viewport-bar"><span className="scene-name">{shot.name}</span><div className="spacer"/>
+        <button disabled={!contextEnabled} onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); setRegionMenu({ shotId: shot.id, anchor: { x: rect.left, y: rect.bottom + 4 }, hits: [], target: '' }); }}>新建区域</button>
         <button onClick={navigation.fit}>适应画布</button>
         <label>视图 <select aria-label="视图" value={zoom} onChange={e => navigation.zoomTo(Number(e.target.value))}>
           {[0.25, 0.5, 1, 1.5, 2, 4].includes(zoom) ? null : <option value={zoom}>{Math.round(zoom * 100)}%</option>}
@@ -219,12 +295,15 @@ function App() {
           <SelectionOverlay shot={tools.display ?? shot} selected={selected} activeRegion={activeRegion} showAllRegions={showAllRegions} interactive={!playing && !navigation.panMode && tools.tool === "move" && !tools.hasDraft} select={(id, region) => { setSelected(id); selectRegion(region); }}/>
           <WaterOverlapOverlay shot={tools.display ?? shot}/>{collisionDebug && <CollisionOverlay shot={tools.display ?? shot} frame={local}/>}
           {!playing && tools.overlay}
+          {menuRegion && <svg className="selection-overlay context-target-overlay" viewBox="0 0 1280 720" aria-label="快捷菜单目标区域"><polygon points={regionPoints(menuRegion.region).map(p => `${100 + p.x * 720 / 1024},${720 - p.y * 720 / 1024}`).join(' ')}/></svg>}
           {!selected && shot.studio === "pixi" && <svg className="selection-overlay" viewBox="0 0 1280 720"><text className="origin-label" x="105" y="712">原点 (0, 0) · Y ↑</text></svg>}
         </div>
         {loading && <div className="loading-canvas">{loadError || "正在加载背景；导出将在画面就绪后启用"}{loadError && <button onClick={() => { if (renderer.current) retryRender(v => v + 1); else retryRenderer(v => v + 1); }}>重试加载资源</button>}</div>}
       </div>
-      <div className="transport"><span className="live-badge">● 环境效果实时展示</span><small>{compact ? '单指编辑 · 双指缩放 / 平移' : '无需播放 · 中键拖动画布 · 环境元素可随时编辑'}</small><button className="mobile-inspect" onClick={() => setPane('inspector')}>{selected ? '编辑所选属性' : '背景 / 环境属性'}</button></div>
+      <div className="transport"><span className="live-badge">● 环境效果实时展示</span><small>{compact ? '轻点区域编辑 · 长按新建 · 双指缩放 / 平移' : '右键管理区域 · 中键拖动画布 · 环境效果实时展示'}</small><button className="mobile-inspect" onClick={() => setPane('inspector')}>{selected ? '编辑所选属性' : '背景 / 环境属性'}</button></div>
     </main>
+    {regionMenu && <CanvasContextMenu anchor={regionMenu.anchor} hits={regionMenu.hits} target={menuHit} targetValid={!!menuRegion} canAdd={!!menuRegion && menuRegion.effect.regions.length < 12}
+      changeTarget={target => setRegionMenu(current => current ? { ...current, target } : null)} action={actOnRegion} create={createCanvasRegion} close={() => setRegionMenu(null)}/>}
     <MobileDrawer as="aside" className="right" id="pane-inspector" title="属性" side="right" open={pane === 'inspector'} onClose={showCanvas}>
       <div key={shot.id + selected} className="inspector-content"><h2>属性</h2><label>布景名称<NameField value={shot.name} onValueChange={value => edit(p => { p.shots[index].name = value; })}/></label>{actor && <><h2>角色路线</h2><label>角色层级<NumberField min="-100" max="100" value={actor.layer} onValueChange={value => edit(p => { p.shots[index].actors.find(a => a.id === actor.id)!.layer = value; })}/></label><label>元素名称<NameField value={actor.name} onValueChange={value => edit(p => { p.shots[index].actors.find(a => a.id === actor.id)!.name = value; })}/></label>{(['start', 'end'] as const).map(key => <fieldset key={key}><legend>{key === 'start' ? '起点' : '终点'}</legend>{(['x', 'y'] as const).map(axis => <label key={axis}>{axis.toUpperCase()}<NumberField value={actor[key][axis]} onValueChange={value => edit(p => { p.shots[index].actors.find(a => a.id === actor.id)![key][axis] = value; })}/></label>)}</fieldset>)}<small>逻辑坐标 1536 × 1024，左下角为 (0, 0)。角色编辑位置保持不变，环境效果独立运行。</small></>}<EnvironmentInspector {...envProps} draw={i => { navigation.setPanMode(false); tools.startRegion(i); showCanvas(); }} vertices={i => { selectRegion(i); navigation.setPanMode(false); tools.choose('vertices'); showCanvas(); }}/><BackgroundPanel shot={shot} manifest={manifest} change={envProps.change} assets={project.assets}/><ExtendedInspector project={project} shot={shot} edit={edit} selected={selected} drawRoute={() => { navigation.setPanMode(false); tools.choose('route'); showCanvas(); }}/><h2>运行模式</h2><p className="muted">{isLocalWork() ? `项目文件夹：${workspaceDirectory()}。自定义素材与 project.json 随作品目录保存；仓库内作品可提交 Git，切换设备前请停止服务并同步。` : '精简资源预览；项目只保存在当前浏览器。完整素材、磁盘读写及服务端视频导出请使用本地工作模式。'}</p><h2>输出</h2><button disabled={!ready || !hydrated || fileBusy || loading || exporting} onClick={async () => { try { download(await png(canvas.current!), `frame-${frame}.png`); } catch (e) { setStatus(String(e)); } }}>保存当前帧 PNG</button><p className="muted">当前先专注场景编辑和环境实时效果，视频编排与时间轴暂不开放。已有项目数据保留。</p></div>
     </MobileDrawer>

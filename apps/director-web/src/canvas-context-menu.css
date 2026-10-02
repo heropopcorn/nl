@@ -1,0 +1,21 @@
+.canvas-context-menu { position: fixed; inset: auto; margin: 0; width: 320px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); padding: 12px; overflow: auto; overscroll-behavior: contain; border: 1px solid #526d83; border-radius: 12px; background: #192635; color: #d7dfeb; box-shadow: 0 12px 40px #0009; }
+.canvas-context-menu::backdrop { background: #0003; }
+.context-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.context-heading strong { min-width: 0; overflow-wrap: anywhere; }
+.context-heading button { flex-shrink: 0; }
+.context-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.canvas-context-menu button { min-height: 40px; font-size: 13px; }
+.canvas-context-menu .danger { color: #ffb6b6; border-color: #985e67; }
+.context-create { display: grid; gap: 6px; }
+.context-create h2 { margin: 4px 0 0; }
+.context-create label { margin: 0 0 6px; }
+.context-note { color: #a0b5c7; font-size: 12px; line-height: 1.5; margin: 10px 0; }
+.context-target-overlay { pointer-events: none; }
+.context-target-overlay polygon { fill: #71ffe126; stroke: #c4fff1; stroke-width: 2; stroke-dasharray: 6 3; vector-effect: non-scaling-stroke; }
+.viewport { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
+.creation-hint { align-self: center; color: #a7ead8; font-size: 12px; }
+@media (max-width: 1023px) {
+  .canvas-context-menu button { min-height: 44px; font-size: 14px; }
+  .canvas-context-menu select { font-size: 16px; }
+  .creation-hint { flex-basis: 100%; }
+}
