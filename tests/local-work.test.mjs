@@ -99,7 +99,7 @@ test('local production server saves binary media to disk and keeps browser data 
     await expect(page.locator('.workspace-warning')).toContainText('登录已过期');
     assert.equal(await page.evaluate(()=>{const e=new Event('beforeunload',{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented;}),true);
     await context.addCookies([{name:'director_session',value:`${expires}.${signature}`,url:base}]);
-    await page.getByRole('button',{name:'重试保存',exact:true}).click();
+    await page.locator('.workspace-warning').getByRole('button',{name:'重试保存',exact:true}).click();
     await expect.poll(async()=>JSON.parse(await readFile(path.join(dir,'project.json'),'utf8')).shots[0].name).toBe('登录过期时的修改');
     await expect(page.locator('.workspace-warning')).toHaveCount(0);
     // A transient network failure leaves an IndexedDB draft recoverable on reload.

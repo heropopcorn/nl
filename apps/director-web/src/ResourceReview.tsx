@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { MobileSections } from './ResponsiveLayout';
 import { ResourceDialog } from './ResourceDialog';
 import { decideReview, loadReviewManifest, loadReviewRows, type ReviewManifest, type ReviewRow, type ReviewStatus } from './resource-review-client';
 import './resource-review.css';
@@ -6,6 +7,7 @@ import './resource-review.css';
 const labels:Record<ReviewStatus,string>={pending:'未标记',usable:'可用',unusable:'不可用'};
 function ReviewPanel({close}:{close:()=>void}) {
   const [manifest,setManifest]=useState<ReviewManifest|null>(null),[rows,setRows]=useState<Record<string,ReviewRow>>({});
+  const [mobileSection,setMobileSection]=useState<'list'|'preview'>('list');
   const [selected,setSelected]=useState(''),[filter,setFilter]=useState<'all'|ReviewStatus>('pending');
   const [search,setSearch]=useState(''),[note,setNote]=useState(''),[error,setError]=useState(''),[message,setMessage]=useState('');
   const [loading,setLoading]=useState(true),[saving,setSaving]=useState(false),[online,setOnline]=useState(false);
@@ -31,9 +33,10 @@ function ReviewPanel({close}:{close:()=>void}) {
     window.addEventListener('beforeunload',guard);return ()=>window.removeEventListener('beforeunload',guard);
   },[dirty,saving]);
   function choose(id:string) {
-    if(saving || id===selected)return;
+    if(saving)return;
+    if(id===selected){setMobileSection('preview');return;}
     if(dirty && !confirm('备注尚未保存，是否放弃备注并切换资源？'))return;
-    setSelected(id);setNote(rows[id]?.note || '');setMessage('');
+    setMobileSection('preview');setSelected(id);setNote(rows[id]?.note || '');setMessage('');
   }
   async function refresh() {
     if(!manifest || saving)return;
@@ -57,7 +60,7 @@ function ReviewPanel({close}:{close:()=>void}) {
     <div className="review-panel">
       {!manifest?.enabled && !loading && !error ? <section><h3>资源确认尚未启用</h3><p>把待确认的图片、视频或动图放入 resource-review/inbox/。部署者需先恢复 Supabase、应用确认表迁移并配置服务端环境变量，再重新发布。</p><p>本地制作不受影响；此模块不会把标记假装保存在浏览器，也不会自动删除素材。</p></section> : <>
       <div className="review-toolbar"><label>确认状态<select aria-label="确认状态" value={filter} onChange={e=>setFilter(e.target.value as typeof filter)}><option value="pending">未标记</option><option value="usable">可用</option><option value="unusable">不可用</option><option value="all">本批次全部</option></select></label><input aria-label="搜索待确认资源" placeholder="搜索名称" value={search} onChange={e=>setSearch(e.target.value)}/><button disabled={loading||saving||!manifest} onClick={refresh}>刷新云端状态</button><small>本批次 {items.length} 项 · 未标记 {items.filter(a=>rows[a.id]?.status==='pending').length} · 可用 {items.filter(a=>rows[a.id]?.status==='usable').length} · 不可用 {items.filter(a=>rows[a.id]?.status==='unusable').length}</small></div>
-      <div className="review-body"><section className="review-grid" aria-label="待确认资源列表">
+      <MobileSections label="资源确认分区" value={mobileSection} change={setMobileSection} items={[['list', '待确认列表'], ['preview', '预览 / 确认']]}/><div className="review-body" data-mobile-section={mobileSection}><section className="review-grid" aria-label="待确认资源列表">
         {shown.map(a=><button key={a.id} className={a.id===selected?'selected':''} disabled={saving} onClick={()=>choose(a.id)} aria-label={`查看 ${a.name}`}>
           {a.kind==='video'?<div className="review-video-placeholder">▶ 视频</div>:<img src={a.url} alt="" loading="lazy"/>}
           <span>{a.name}</span><small>{a.kind==='animation'?'动图 · ':''}{rows[a.id]?labels[rows[a.id].status]:'状态未读取'} · {(a.bytes/1024/1024).toFixed(2)} MB</small>

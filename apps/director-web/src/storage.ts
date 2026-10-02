@@ -5,37 +5,50 @@ const KEY = 'yuanli.web-director.v1';
 const BACKUPS = `${KEY}.backups`;
 const PENDING = `${KEY}.pending`;
 export type ProjectBackup = { id: string; time: number; project: Project };
+let previewState = { dirty: false, saving: false, error: '' };
+let dirtyGeneration = 0;
+const listeners = new Set<() => void>();
+export const previewSaveState = () => previewState;
+export const subscribePreviewSave = (notify: () => void) => { listeners.add(notify); return () => { listeners.delete(notify); }; };
+function updatePreview(value: Partial<typeof previewState>) { previewState = { ...previewState, ...value }; listeners.forEach(notify => notify()); }
+export function markProjectDirty() { if (!isLocalWork()) { dirtyGeneration++; updatePreview({ dirty: true }); } }
 function db(): Promise<IDBDatabase> { return new Promise((resolve, reject) => { const req = indexedDB.open('yuanli-director', 1); req.onupgradeneeded = () => req.result.createObjectStore('documents'); req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); }); }
 async function read(key: string): Promise<unknown> {
   const store = await db();
   try { return await new Promise((resolve, reject) => { const request = store.transaction('documents').objectStore('documents').get(key); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); } finally { store.close(); }
 }
+function validBackups(raw: unknown): ProjectBackup[] {
+  return (Array.isArray(raw) ? raw : []).flatMap(item => { const p = projectSchema.safeParse(item?.project); return p.success && typeof item.id === 'string' && Number.isFinite(item.time) ? [{ id: item.id, time: item.time, project: p.data }] : []; });
+}
 export async function listProjectBackups(): Promise<ProjectBackup[]> {
   if (isLocalWork()) return workspaceBackups();
-  const raw = await read(BACKUPS);
-  return (Array.isArray(raw) ? raw : []).flatMap(item => { const p = projectSchema.safeParse(item.project); return p.success ? [{ id: String(item.id), time: Number(item.time), project: p.data }] : []; });
+  return validBackups(await read(BACKUPS));
 }
 export async function loadProject(onRecovered?: () => void): Promise<Project | null> {
   if (isLocalWork()) return loadWorkspace();
   // Small edits have a synchronous write-ahead journal: a refresh must not lose
   // an edit whose IndexedDB transaction was interrupted by page teardown.
-  try { const pending = localStorage.getItem(PENDING); if (pending) { const p = projectSchema.safeParse(JSON.parse(pending)); if (p.success) return p.data; } } catch { /* Fall back to durable storage. */ }
+  let foundDocument = false;
+  try { const pending = localStorage.getItem(PENDING); if (pending !== null) { foundDocument = true; const p = projectSchema.safeParse(JSON.parse(pending)); if (p.success) return p.data; } } catch { /* Fall back to durable storage. */ }
   // IndexedDB is authoritative; localStorage may be a stale mirror after quota errors.
   let failure: unknown;
-  try { const p = projectSchema.safeParse(await read(KEY)); if (p.success) return p.data; } catch (error) { failure = error; }
-  try { const local = localStorage.getItem(KEY); if (local) { const p = projectSchema.safeParse(JSON.parse(local)); if (p.success) return p.data; } } catch { /* Try historical snapshots next. */ }
-  try { const backups = await listProjectBackups(); if (backups.length) { onRecovered?.(); return backups[0].project; } } catch (error) { failure = error; }
+  try { const raw = await read(KEY); foundDocument ||= raw !== undefined; const p = projectSchema.safeParse(raw); if (p.success) return p.data; } catch (error) { failure = error; }
+  try { const local = localStorage.getItem(KEY); if (local !== null) { foundDocument = true; const p = projectSchema.safeParse(JSON.parse(local)); if (p.success) return p.data; } } catch { /* Try historical snapshots next. */ }
+  try { const raw = await read(BACKUPS); foundDocument ||= raw !== undefined; const backups = validBackups(raw); if (backups.length) { onRecovered?.(); return backups[0].project; } } catch (error) { failure = error; }
   if (failure) throw failure;
+  if (foundDocument) throw new Error('发现无法读取的项目，且没有可用备份。已保留原始数据，不会用示例项目覆盖。');
   return null;
 }
 let queue = Promise.resolve();
 let revision = 0, pendingSaves = 0;
-export const hasPendingSaves = () => pendingSaves > 0 || workspacePending();
+export const hasPendingSaves = () => pendingSaves > 0 || previewState.dirty || workspacePending();
 export function saveProject(project: Project, checkpoint = false) {
   if (isLocalWork()) return saveWorkspace(project, checkpoint);
   const snapshot = projectSchema.parse(project), json = JSON.stringify(snapshot);
   const currentRevision = ++revision;
+  const savedGeneration = ++dirtyGeneration;
   pendingSaves++;
+  updatePreview({ dirty: true, saving: true });
   if (json.length < 2_000_000) {
     try { localStorage.setItem(PENDING, json); localStorage.setItem(KEY, json); } catch { /* Do not claim durability before the database commits. */ }
   } else {
@@ -43,12 +56,13 @@ export function saveProject(project: Project, checkpoint = false) {
     try { localStorage.removeItem(PENDING); } catch { /* Closing is guarded below. */ }
   }
   const job = queue.catch(() => {}).then(async () => {
+    if (!checkpoint && currentRevision !== revision) return;
     const store = await db();
     try { await new Promise<void>((resolve, reject) => {
       const transaction = store.transaction('documents', 'readwrite'), documents = transaction.objectStore('documents');
       const old = documents.get(KEY), history = documents.get(BACKUPS);
       history.onsuccess = () => {
-        const backups: ProjectBackup[] = Array.isArray(history.result) ? history.result : [];
+        const backups = validBackups(history.result);
         const previous = projectSchema.safeParse(old.result);
         const candidate = checkpoint ? snapshot : previous.success ? previous.data : null;
         if (candidate && (checkpoint || !backups.length || Date.now() - backups[0].time >= 60_000) && (checkpoint || JSON.stringify(candidate) !== json)) {
@@ -64,8 +78,9 @@ export function saveProject(project: Project, checkpoint = false) {
     }); } finally { store.close(); }
     if (revision === currentRevision) {
       try { if (json.length < 2_000_000) localStorage.setItem(KEY, json); else localStorage.removeItem(KEY); localStorage.removeItem(PENDING); } catch { /* Durable copy committed successfully. */ }
+      if (savedGeneration === dirtyGeneration) updatePreview({ dirty: false, error: '' });
     }
-  }).finally(() => { pendingSaves--; }); queue = job; return job;
+  }).catch(error => { if (currentRevision === revision) updatePreview({ dirty: true, error: String(error) }); throw error; }).finally(() => { pendingSaves--; updatePreview({ saving: pendingSaves > 0 }); }); queue = job; return job;
 }
 export async function importMedia(file: File, category: Project['assets'][number]['category']) {
   const maxMB=isLocalWork()?512:20;
